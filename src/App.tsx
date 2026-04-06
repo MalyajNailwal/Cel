@@ -1023,6 +1023,11 @@ export default function App() {
               }
             } else {
               executionResults.push({ action: step.action, success: false, output: lastError });
+              
+              // If table overlap error, add helpful message
+              if (step.action === 'create_table' && lastError.toLowerCase().includes('overlap')) {
+                executionResults.push({ action: step.action, success: false, output: `Hint: A table already exists in "${params.address}". Delete the existing table first, then retry if needed.` });
+              }
             }
           } catch (error) {
             const errMsg = error instanceof Error ? error.message : String(error);
