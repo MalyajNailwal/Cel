@@ -38,12 +38,12 @@ interface SelectedRangeInfo {
 
 const PHASE_CONFIG: Record<ProcessingPhase, { label: string; color: string; accent: string }> = {
   idle: { label: '', color: '', accent: '' },
-  thinking: { label: 'Understanding...', color: 'text-violet-600', accent: 'from-violet-500 to-purple-600' },
+  thinking: { label: 'Analyzing...', color: 'text-violet-600', accent: 'from-violet-500 to-purple-600' },
   reasoning: { label: 'Thinking...', color: 'text-indigo-600', accent: 'from-indigo-500 to-purple-600' },
-  planning: { label: 'Planning steps...', color: 'text-blue-600', accent: 'from-blue-500 to-indigo-600' },
+  planning: { label: 'Planning...', color: 'text-blue-600', accent: 'from-blue-500 to-indigo-600' },
   analyzing: { label: 'Analyzing data...', color: 'text-cyan-600', accent: 'from-cyan-500 to-blue-600' },
-  executing: { label: 'Working in Excel...', color: 'text-emerald-600', accent: 'from-emerald-500 to-teal-600' },
-  validating: { label: 'Validating results...', color: 'text-amber-600', accent: 'from-amber-500 to-orange-600' },
+  executing: { label: 'Working...', color: 'text-emerald-600', accent: 'from-emerald-500 to-teal-600' },
+  validating: { label: 'Validating...', color: 'text-amber-600', accent: 'from-amber-500 to-orange-600' },
 };
 
 export default function App() {
