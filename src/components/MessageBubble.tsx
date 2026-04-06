@@ -306,23 +306,22 @@ export const TypingIndicator: React.FC<{ phase?: string }> = ({ phase = 'thinkin
 export const WelcomeScreen: React.FC = () => {
   return (
     <div className="flex-1 flex flex-col items-center justify-center px-4 py-6 animate-fade-in">
-      <div className="w-14 h-14 rounded-xl bg-[#217346] flex items-center justify-center mb-4 shadow-md">
-        <span className="text-2xl font-bold text-white">C</span>
+      <div className="w-16 h-16 rounded-2xl bg-[#217346] flex items-center justify-center mb-5 shadow-lg shadow-[#217346]/25">
+        <span className="text-3xl font-bold text-white">C</span>
       </div>
-      <h2 className="text-xl font-bold text-gray-900 mb-1">Cel</h2>
+      <h2 className="text-2xl font-bold text-gray-900 mb-1">Cel</h2>
       <p className="text-sm text-gray-500 mb-6">
         Tell me what to do. Consider it done.
       </p>
-      <div className="flex flex-wrap gap-2 justify-center max-w-[280px]">
-        <span className="px-3 py-1.5 rounded-lg bg-[#217346]/10 text-[#217346] text-xs font-medium">
-          sum of column A
-        </span>
-        <span className="px-3 py-1.5 rounded-lg bg-[#217346]/10 text-[#217346] text-xs font-medium">
-          pie chart
-        </span>
-        <span className="px-3 py-1.5 rounded-lg bg-[#217346]/10 text-[#217346] text-xs font-medium">
-          bold header
-        </span>
+      <div className="w-full max-w-[260px] space-y-2">
+        <div className="p-3 rounded-xl bg-gray-50 border border-gray-100">
+          <p className="text-xs font-medium text-gray-500 mb-2">Try saying:</p>
+          <div className="space-y-1.5">
+            <p className="text-sm text-gray-700">"Calculate total in column B"</p>
+            <p className="text-sm text-gray-700">"Create a chart from my data"</p>
+            <p className="text-sm text-gray-700">"Format this as a table"</p>
+          </div>
+        </div>
       </div>
     </div>
   );
