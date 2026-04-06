@@ -277,18 +277,20 @@ export default function App() {
                   const rangePart = addrParts.length > 1 ? addrParts[1] : addrParts[0];
                   const rangeCells = rangePart.split(':');
                   const startCell = rangeCells[0];
+                  const endCell = rangeCells.length > 1 ? rangeCells[1] : rangeCells[0];
                   const startColMatch = startCell.match(/^([A-Z]+)/);
+                  const endColMatch = endCell.match(/^([A-Z]+)/);
                   const startColIdx = startColMatch ? startColMatch[1].charCodeAt(0) - 65 : 0;
-                  const maxRows = Math.min(selectedData.length, 100);
+                  const endColIdx = endColMatch ? endColMatch[1].charCodeAt(0) - 65 : startColIdx;
                   const numCols = headers.length;
 
                   const numericCols: number[] = [];
                   const categoricalCols: number[] = [];
                   for (let i = 0; i < headers.length; i++) {
                     const h = headers[i].toLowerCase();
-                    if (/name|id|blood|gender|status|department|region|product|city|category|activity|date/i.test(h)) {
+                    if (/name|id|blood|gender|status|department|region|product|city|category|activity|date|month/i.test(h)) {
                       categoricalCols.push(i);
-                    } else if (/age|hemoglobin|rbc|wbc|platelets|salary|revenue|score|quantity|price|count|amount|total|bp|sugar|cholesterol|triglycerides|creatinine|urea|sgot|sgpt|tsh|vitamin|iron|ferritin|hours/i.test(h)) {
+                    } else if (/age|hemoglobin|rbc|wbc|platelets|salary|revenue|score|quantity|price|count|amount|total|bp|sugar|cholesterol|triglycerides|creatinine|urea|sgot|sgpt|tsh|vitamin|iron|ferritin|hours|sales|units/i.test(h)) {
                       numericCols.push(i);
                     } else {
                       const sampleVal = rows[Math.min(2, rows.length - 1)]?.[i];
@@ -302,17 +304,15 @@ export default function App() {
 
                   const createChartForColumn = async (colIdx: number, chartType: string, title: string) => {
                     const colLetter = String.fromCharCode(65 + startColIdx + colIdx);
-                    const chartRange = `${colLetter}1:${colLetter}${maxRows}`;
+                    const endRowMatch = endCell.match(/(\d+)$/);
+                    const endRow = endRowMatch ? endRowMatch[1] : '100';
+                    const chartRange = `${colLetter}1:${colLetter}${endRow}`;
                     try {
                       await ExcelAPI.createChart(chartType, chartRange, sheetName, title);
                       chartsCreated++;
                       chartDesc += `📊 ${chartType} chart: ${title}\n`;
                     } catch (e) {
-                      const endColIdx = startColIdx + numCols - 1;
-                      const startLetter = String.fromCharCode(65 + startColIdx);
-                      const endLetter = String.fromCharCode(65 + endColIdx);
-                      const fullRange = `${startLetter}1:${endLetter}${maxRows}`;
-                      await ExcelAPI.createChart(chartType, fullRange, sheetName, title);
+                      await ExcelAPI.createChart(chartType, address, sheetName, title);
                       chartsCreated++;
                       chartDesc += `📊 ${chartType} chart: ${title}\n`;
                     }
@@ -323,7 +323,9 @@ export default function App() {
                     const maxCol = startColIdx + Math.max(col1Idx, col2Idx);
                     const startLetter = String.fromCharCode(65 + minCol);
                     const endLetter = String.fromCharCode(65 + maxCol);
-                    const chartRange = `${startLetter}1:${endLetter}${maxRows}`;
+                    const endRowMatch = endCell.match(/(\d+)$/);
+                    const endRow = endRowMatch ? endRowMatch[1] : '100';
+                    const chartRange = `${startLetter}1:${endLetter}${endRow}`;
                     await ExcelAPI.createChart(chartType, chartRange, sheetName, title);
                     chartsCreated++;
                     chartDesc += `📊 ${chartType} chart: ${title}\n`;
@@ -382,11 +384,7 @@ export default function App() {
                   }
 
                   if (chartsCreated === 0) {
-                    const endColIdx = startColIdx + numCols - 1;
-                    const startLetter = String.fromCharCode(65 + startColIdx);
-                    const endLetter = String.fromCharCode(65 + endColIdx);
-                    const fullRange = `${startLetter}1:${endLetter}${maxRows}`;
-                    await ExcelAPI.createChart('column', fullRange, sheetName, 'Data Chart');
+                    await ExcelAPI.createChart('column', address, sheetName, 'Data Chart');
                     chartsCreated++;
                     chartDesc = `📊 Chart created on ${sheetName}`;
                   }
