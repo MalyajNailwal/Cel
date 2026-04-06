@@ -430,13 +430,28 @@ export async function createChart(
   position?: { left: number; top: number; width: number; height: number }
 ): Promise<string> {
   return await Excel.run(async (context) => {
-    const sheet = sheetName
-      ? context.workbook.worksheets.getItem(sheetName)
-      : context.workbook.worksheets.getActiveWorksheet();
+    let sheet: Excel.Worksheet;
+    
+    try {
+      if (sheetName) {
+        sheet = context.workbook.worksheets.getItem(sheetName);
+      } else {
+        sheet = context.workbook.worksheets.getActiveWorksheet();
+      }
+    } catch (e) {
+      const sheets = context.workbook.worksheets;
+      sheets.load('items');
+      await context.sync();
+      sheet = sheets.items[0];
+    }
 
     const sourceRange = sheet.getRange(dataRange);
     sourceRange.load('address, rowCount, columnCount');
     await context.sync();
+
+    if (sourceRange.isNullObject || sourceRange.rowCount === 0 || sourceRange.columnCount === 0) {
+      throw new Error(`Invalid range: ${dataRange} on sheet ${sheetName || 'active'}`);
+    }
 
     const chartTypeMap: Record<string, Excel.ChartType> = {
       column: Excel.ChartType.columnClustered,
@@ -446,7 +461,7 @@ export async function createChart(
       bar: Excel.ChartType.barClustered,
       barClustered: Excel.ChartType.barClustered,
       barStacked: Excel.ChartType.barStacked,
-      line: Excel.ChartType.lineMarkersStacked,
+      line: Excel.ChartType.lineMarkers,
       lineStacked: Excel.ChartType.lineStacked,
       lineMarkers: Excel.ChartType.lineMarkers,
       lineMarkersStacked: Excel.ChartType.lineMarkersStacked,
@@ -484,43 +499,38 @@ export async function createChart(
 
     const excelChartType = chartTypeMap[chartType] || Excel.ChartType.columnClustered;
 
-    const chart = sheet.charts.add(excelChartType, sourceRange, 'Auto');
+    try {
+      const chart = sheet.charts.add(excelChartType, sourceRange, 'Columns');
 
-    if (title) {
-      chart.title.text = title;
-      chart.title.visible = true;
-    }
-
-    if (position) {
-      chart.left = position.left;
-      chart.top = position.top;
-      chart.width = position.width;
-      chart.height = position.height;
-    } else {
-      chart.width = 550;
-      chart.height = 400;
-      chart.left = 400;
-      chart.top = 20;
-    }
-
-    chart.legend.visible = true;
-    chart.legend.position = 'Bottom';
-
-    await context.sync();
-
-    chart.load('name, series/items');
-    await context.sync();
-
-    if (chartType === 'line' && chart.series.items.length > 0) {
-      for (const series of chart.series.items) {
-        (series.format as any).line.weight = 2.5;
+      if (title) {
+        chart.title.text = title;
+        chart.title.visible = true;
       }
+
+      if (position) {
+        chart.left = position.left;
+        chart.top = position.top;
+        chart.width = position.width;
+        chart.height = position.height;
+      } else {
+        chart.width = 550;
+        chart.height = 400;
+        chart.left = 400;
+        chart.top = 20;
+      }
+
+      chart.legend.visible = true;
+      chart.legend.position = 'Bottom';
+
       await context.sync();
+
+      chart.load('name');
+      await context.sync();
+
+      return `Chart "${title || chart.name}" created successfully on sheet "${sheetName || 'active sheet'}" with data range "${dataRange}"`;
+    } catch (chartErr: any) {
+      console.error('Chart creation error:', chartErr.message);
+      throw new Error(`Chart failed: ${chartErr.message}. Range: ${dataRange}, Type: ${chartType}`);
     }
-
-    chart.load('name');
-    await context.sync();
-
-    return `Chart "${title || chart.name}" created successfully on sheet "${sheetName || 'active sheet'}" with data range "${dataRange}"`;
   });
 }
