@@ -187,7 +187,7 @@ export default function App() {
         }
 
         // Check if user is referring to selected area
-        const userWantsSelected = /selected|these|this|here|highlighted|current|this range|these cells/i.test(userMessage);
+        const userWantsSelected = /selected|these|this|here|highlighted|current|this range|these cells|put here|write here|add here|fill here/i.test(userMessage);
 
         // Check if user wants data generation
         const dataGenMatch = userMessage.match(/create\s+(a\s+)?table.*?(?:with|for)\s+(\d+)\s+(people|records|employees|sales|students|rows)/i);
@@ -558,9 +558,11 @@ export default function App() {
           const params = { ...step.params };
 
           // CRITICAL: Force selected range for write operations when user refers to selection
+          console.log('[EXECUTION] userWantsSelected:', userWantsSelected, '| selectedRange:', selectedRange, '| step.action:', step.action);
           if (userWantsSelected && selectedRange) {
             const writeActions = ['set_values', 'set_formulas', 'apply_format', 'create_chart', 'create_table', 'sort_range', 'auto_fill'];
             if (writeActions.includes(step.action)) {
+              console.log('[EXECUTION] Overwriting params with selected range:', selectedRange.address, selectedRange.sheetName);
               if (!params.address || params.address !== selectedRange.address) {
                 params.address = selectedRange.address;
                 validationErrors.push(`Step ${i + 1}: Using selected range "${selectedRange.address}" as target`);
@@ -1176,7 +1178,10 @@ async function executeStep(step: { action: string; params: Record<string, any>; 
     case 'get_selected_range': return JSON.stringify(await ExcelAPI.getSelectedRange());
     case 'get_range': return JSON.stringify(await ExcelAPI.getRange(params.address, params.sheet_name));
     case 'get_sheet_data': return JSON.stringify(await ExcelAPI.getSheetData(params.sheet_name, params.max_rows));
-    case 'set_values': await ExcelAPI.setValues(params.address, params.values, params.sheet_name); return `Values written to ${params.address}`;
+    case 'set_values': 
+      console.log('[EXECUTION] set_values called with:', { address: params.address, values: params.values?.length, sheet_name: params.sheet_name });
+      await ExcelAPI.setValues(params.address, params.values, params.sheet_name); 
+      return `Values written to ${params.address}`;
     case 'set_formulas': await ExcelAPI.setFormulas(params.address, params.formulas, params.sheet_name); return `Formulas written to ${params.address}`;
     case 'apply_format': {
       const format = { address: params.address, sheetName: params.sheet_name, bold: params.bold, italic: params.italic, fontColor: params.font_color, fillColor: params.fill_color, fontSize: params.font_size, fontFamily: params.font_family, numberFormat: params.number_format, horizontalAlignment: params.horizontal_alignment, verticalAlignment: params.vertical_alignment, wrapText: params.wrap_text };
