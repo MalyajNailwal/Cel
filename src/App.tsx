@@ -149,10 +149,19 @@ export default function App() {
         const plan = planData.plan || [];
         const reasoning = planData.reasoning;
         
-        // Show reasoning as a message (only if enabled)
+        // Show reasoning as a prominent thinking message first
         if (reasoningEnabled && reasoning) {
           setProcessingPhase('reasoning');
-          const cleanReasoning = reasoning.replace(/\*/g, '').trim();
+          
+          // Clean and format reasoning nicely
+          const cleanReasoning = reasoning
+            .replace(/\*/g, '')
+            .replace(/^\d+\.\s*/gm, '')  // Remove numbered list
+            .replace(/^-\s*/gm, '')      // Remove bullet points
+            .replace(/^•\s*/gm, '')      // Remove bullet symbols
+            .replace(/\n{2,}/g, '\n')    // Clean up extra newlines
+            .trim();
+          
           const reasoningMsg: ExtendedMessage = {
             id: `reasoning-${Date.now()}`,
             role: 'assistant',
