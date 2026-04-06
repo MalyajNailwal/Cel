@@ -41,9 +41,11 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onSend, disabled, selected
 
   const handleInput = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setInput(e.target.value);
-    const el = e.target;
-    el.style.height = 'auto';
-    el.style.height = Math.min(el.scrollHeight, 100) + 'px';
+    requestAnimationFrame(() => {
+      const el = e.target;
+      el.style.height = 'auto';
+      el.style.height = Math.min(el.scrollHeight, 120) + 'px';
+    });
   }, []);
 
   const handleCancel = useCallback(() => {
@@ -77,9 +79,10 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onSend, disabled, selected
             onKeyDown={handleKeyDown}
             placeholder={rangePreview ? "Ask about selected range..." : "Ask Cel to do something..."}
             rows={1}
+            style={{ height: 'auto' }}
             className={cn(
               'w-full bg-transparent text-[13px] text-gray-800 placeholder-gray-400 resize-none outline-none',
-              'max-h-[100px] leading-relaxed font-normal'
+              'max-h-[120px] leading-relaxed font-normal'
             )}
             disabled={disabled}
           />
