@@ -89,9 +89,11 @@ Each step must have a specific action, target range, and all parameters needed.
 Always use A1 notation for ranges. Always read before writing if you need context.
 
 IMPORTANT - For creating tables with data (e.g., "create table with 100 people"):
-1. First, generate the data using set_values with realistic sample data
-2. Then create the table using create_table on that range
-NEVER just call create_table without first creating the data with set_values"""
+1. You MUST generate the actual data in the "values" field of set_values
+2. The "values" field must be a 2D array: [["Header1", "Header2"], ["row1col1", "row1col2"], ...]
+3. Generate at least 10 rows of realistic sample data
+4. Then create the table using create_table on that range
+5. NEVER leave "values" empty - always populate with actual data"""
 
 TASK_DESCRIPTION = """Create a JSON plan for this Excel request: {message}
 
@@ -144,11 +146,13 @@ CRITICAL RULES — FOLLOW THESE EXACTLY:
 5. NEVER create data in a different range than what the user selected unless they explicitly say "create a new sheet" or "start from A1"
 6. If you need to know current data in selected range, call get_selected_range first
 7. For charts, use the selected range's address as data_range. If multiple charts are requested, create multiple create_chart steps.
-8. For set_values, params must include "address" and "values" (2D array)
+8. For set_values, params MUST include "address" and "values" (2D array with ACTUAL data - not placeholders)
 9. For set_formulas, params must include "address" and "formulas" (2D array)
 10. For apply_format, params must include "address" and format properties (bold, fill_color, font_color, number_format, etc.)
 11. Be specific with cell ranges — match the selected range dimensions
-12. Keep it simple and correct"""
+12. Keep it simple and correct
+13. WHEN GENERATING SAMPLE DATA: You MUST include the actual data in the "values" array. Example: "values": [["Name", "Age", "Gender"], ["John", 25, "Male"], ["Jane", 30, "Female"]]
+14. NEVER return empty values or placeholder text in the values array - always generate real data"""
 
 VALIDATOR_PROMPT = """You verify that Excel operations completed successfully and summarize what was done."""
 VALIDATOR_TASK = """Original request: {message}

@@ -306,9 +306,9 @@ export async function insertRows(address: string, count: number, sheetName?: str
   await Excel.run(async (context) => {
     const sheet = sheetName
       ? context.workbook.worksheets.getItem(sheetName)
-      : (context.workbook as any).getActiveWorksheet();
+      : context.workbook.worksheets.getActiveWorksheet();
     const range = sheet.getRange(address);
-    range.getRowsAbove().insert('Down', count);
+    range.getRowsAbove().insert('Down');
     await context.sync();
   });
 }
@@ -317,7 +317,7 @@ export async function deleteRows(address: string, count: number, sheetName?: str
   await Excel.run(async (context) => {
     const sheet = sheetName
       ? context.workbook.worksheets.getItem(sheetName)
-      : (context.workbook as any).getActiveWorksheet();
+      : context.workbook.worksheets.getActiveWorksheet();
     const range = sheet.getRange(address);
     range.getRowsBelow().delete('Up');
     await context.sync();
@@ -328,9 +328,9 @@ export async function insertColumns(address: string, count: number, sheetName?: 
   await Excel.run(async (context) => {
     const sheet = sheetName
       ? context.workbook.worksheets.getItem(sheetName)
-      : (context.workbook as any).getActiveWorksheet();
+      : context.workbook.worksheets.getActiveWorksheet();
     const range = sheet.getRange(address);
-    range.getColumnsBefore().insert('Right', count);
+    range.getColumnsBefore().insert('Right');
     await context.sync();
   });
 }
@@ -339,7 +339,7 @@ export async function deleteColumns(address: string, count: number, sheetName?: 
   await Excel.run(async (context) => {
     const sheet = sheetName
       ? context.workbook.worksheets.getItem(sheetName)
-      : (context.workbook as any).getActiveWorksheet();
+      : context.workbook.worksheets.getActiveWorksheet();
     const range = sheet.getRange(address);
     range.getColumnsBefore().delete('Left');
     await context.sync();
@@ -391,7 +391,7 @@ export async function createTable(address: string, name: string, sheetName?: str
   await Excel.run(async (context) => {
     const sheet = sheetName
       ? context.workbook.worksheets.getItem(sheetName)
-      : (context.workbook as any).getActiveWorksheet();
+      : context.workbook.worksheets.getActiveWorksheet();
     const range = sheet.getRange(address);
     sheet.tables.add(range, true);
     await context.sync();
@@ -402,7 +402,7 @@ export async function sortRange(address: string, columnIndex: number, ascending:
   await Excel.run(async (context) => {
     const sheet = sheetName
       ? context.workbook.worksheets.getItem(sheetName)
-      : (context.workbook as any).getActiveWorksheet();
+      : context.workbook.worksheets.getActiveWorksheet();
     const range = sheet.getRange(address);
     const sort = range.sort;
     sort.apply([{ key: columnIndex, ascending }]);

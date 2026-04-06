@@ -349,9 +349,20 @@ export default function App() {
               params.values = params.values.slice(0, 5000);
               validationErrors.push(`Step ${i + 1}: Dataset too large — clamped to 5000 rows`);
             }
-            if (!params.address) {
-              params.address = 'A1';
-              validationErrors.push(`Step ${i + 1}: Missing address — using "A1"`);
+            
+            const rows = params.values.length;
+            const cols = params.values[0]?.length || 1;
+            const colLetter = cols <= 26 ? String.fromCharCode(64 + cols) : String.fromCharCode(64 + Math.floor((cols - 1) / 26)) + String.fromCharCode(64 + ((cols - 1) % 26) + 1);
+            const correctAddress = `A1:${colLetter}${rows}`;
+            
+            if (params.address && params.address !== correctAddress) {
+              validationErrors.push(`Step ${i + 1}: Address "${params.address}" doesn't match data size — corrected to "${correctAddress}"`);
+            }
+            params.address = correctAddress;
+            
+            if (!params.sheet_name && lastCreatedSheet) {
+              params.sheet_name = lastCreatedSheet;
+              validationErrors.push(`Step ${i + 1}: Using sheet "${lastCreatedSheet}" for data`);
             }
           }
 
@@ -474,6 +485,10 @@ export default function App() {
             if (!params.address) {
               params.address = 'A1';
               validationErrors.push(`Step ${i + 1}: Missing address — using "A1"`);
+            }
+            if (!params.sheet_name && lastCreatedSheet) {
+              params.sheet_name = lastCreatedSheet;
+              validationErrors.push(`Step ${i + 1}: Using sheet "${lastCreatedSheet}" for table`);
             }
           }
 
