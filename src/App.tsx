@@ -231,7 +231,6 @@ export default function App() {
         const isChartRequest = chartKeywords.test(userMessage);
         const isPieRequest = /pie\s*chart/i.test(userMessage);
         const isBarRequest = /bar\s*(graph|chart)/i.test(userMessage);
-        const isMultiChartRequest = isPieRequest && isBarRequest;
 
         if ((isAnalysisRequest || isChartRequest) && selectedRangeData) {
           setProcessingPhase('analyzing');
@@ -262,121 +261,70 @@ export default function App() {
 
             if (analyzeResponse.ok) {
               const analysisResult = await analyzeResponse.json();
-              let chartImages: string[] = [];
-              let chartDesc = '';
 
-              if (isChartRequest && analysisResult.statistics) {
-                const headers = selectedData[0] || [];
-                
-                if (isMultiChartRequest) {
-                  // Generate multiple charts
-                  const pieCol = headers.find((h: string) => /BloodGroup|Gender|Status|Department|Region/i.test(h)) || headers[3] || headers[2];
-                  const barCol = headers.find((h: string) => /Age|Hemoglobin|RBC|WBC|Platelets|Salary|Revenue|Score/i.test(h)) || headers[5] || headers[4];
-                  
-                  const pieResponse = await fetch('/api/generate-chart', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                      data: selectedData,
-                      chart_type: 'pie',
-                      title: `${pieCol} Distribution`,
-                      column_name: pieCol,
-                    }),
-                  });
-                  
-                  if (pieResponse.ok) {
-                    const pieResult = await pieResponse.json();
-                    if (pieResult.chart_image) {
-                      chartImages.push(pieResult.chart_image);
-                      chartDesc += `\n\n📊 Pie Chart: ${pieCol} Distribution`;
+              if (isChartRequest && selectedRangeData) {
+                try {
+                  const sr = JSON.parse(selectedRangeData);
+                  const headers = selectedData[0] || [];
+                  const address = sr.address;
+                  const sheetName = sr.sheetName;
+                  let chartsCreated = 0;
+                  let chartDesc = '';
+
+                  if (isPieRequest) {
+                    const pieCol = headers.findIndex((h: string) => /BloodGroup|Gender|Status|Department|Region/i.test(h));
+                    if (pieCol >= 0 && pieCol < headers.length) {
+                      const colLetter = String.fromCharCode(65 + pieCol);
+                      const pieRange = `${colLetter}1:${colLetter}${selectedData.length}`;
+                      await ExcelAPI.createChart('pie', pieRange, sheetName, `${headers[pieCol]} Distribution`);
+                      chartsCreated++;
+                      chartDesc += `📊 Pie chart created for ${headers[pieCol]} on ${sheetName}\n`;
                     }
                   }
-                  
-                  const barResponse = await fetch('/api/generate-chart', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                      data: selectedData,
-                      chart_type: 'bar',
-                      title: `${barCol} Distribution`,
-                      column_name: barCol,
-                    }),
-                  });
-                  
-                  if (barResponse.ok) {
-                    const barResult = await barResponse.json();
-                    if (barResult.chart_image) {
-                      chartImages.push(barResult.chart_image);
-                      chartDesc += `\n📊 Bar Chart: ${barCol} Distribution`;
+
+                  if (isBarRequest) {
+                    const barCol = headers.findIndex((h: string) => /Age|Hemoglobin|RBC|WBC|Platelets|Salary|Revenue|Score/i.test(h));
+                    if (barCol >= 0 && barCol < headers.length) {
+                      const colLetter = String.fromCharCode(65 + barCol);
+                      const barRange = `${colLetter}1:${colLetter}${selectedData.length}`;
+                      await ExcelAPI.createChart('column', barRange, sheetName, `${headers[barCol]} Distribution`);
+                      chartsCreated++;
+                      chartDesc += `📊 Bar chart created for ${headers[barCol]} on ${sheetName}\n`;
                     }
                   }
-                } else if (isPieRequest) {
-                  const pieCol = headers.find((h: string) => /BloodGroup|Gender|Status|Department|Region/i.test(h)) || headers[3] || headers[2];
-                  const pieResponse = await fetch('/api/generate-chart', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                      data: selectedData,
-                      chart_type: 'pie',
-                      title: `${pieCol} Distribution`,
-                      column_name: pieCol,
-                    }),
-                  });
-                  
-                  if (pieResponse.ok) {
-                    const pieResult = await pieResponse.json();
-                    if (pieResult.chart_image) {
-                      chartImages.push(pieResult.chart_image);
-                      chartDesc = `\n\n📊 Pie Chart: ${pieCol} Distribution`;
-                    }
+
+                  if (chartsCreated === 0 && headers.length >= 2) {
+                    await ExcelAPI.createChart('column', address, sheetName, 'Data Chart');
+                    chartsCreated++;
+                    chartDesc = `📊 Chart created on ${sheetName}`;
                   }
-                } else if (isBarRequest) {
-                  const barCol = headers.find((h: string) => /Age|Hemoglobin|RBC|WBC|Platelets|Salary|Revenue|Score/i.test(h)) || headers[5] || headers[4];
-                  const barResponse = await fetch('/api/generate-chart', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                      data: selectedData,
-                      chart_type: 'bar',
-                      title: `${barCol} Distribution`,
-                      column_name: barCol,
-                    }),
-                  });
-                  
-                  if (barResponse.ok) {
-                    const barResult = await barResponse.json();
-                    if (barResult.chart_image) {
-                      chartImages.push(barResult.chart_image);
-                      chartDesc = `\n\n📊 Bar Chart: ${barCol} Distribution`;
-                    }
-                  }
-                } else {
-                  const chartResponse = await fetch('/api/generate-chart', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                      data: selectedData,
-                      chart_type: 'line',
-                      title: userMessage,
-                    }),
-                  });
-                  
-                  if (chartResponse.ok) {
-                    const chartResult = await chartResponse.json();
-                    if (chartResult.chart_image) {
-                      chartImages.push(chartResult.chart_image);
-                      chartDesc = `\n\n📊 Chart generated (sampled ${chartResult.sampled_points} points from ${chartResult.total_rows} rows):`;
-                    }
-                  }
+
+                  const aiMsg: ExtendedMessage = {
+                    id: `msg-${Date.now()}`,
+                    role: 'assistant',
+                    content: `${analysisResult.analysis || 'Analysis complete.'}\n\n${chartDesc}`,
+                  };
+                  setMessages((prev) => [...prev, aiMsg]);
+                  setIsProcessing(false);
+                  setProcessingPhase('idle');
+                  return;
+                } catch (chartErr: any) {
+                  const aiMsg: ExtendedMessage = {
+                    id: `msg-${Date.now()}`,
+                    role: 'assistant',
+                    content: `${analysisResult.analysis || 'Analysis complete.'}\n\n⚠️ Chart creation failed: ${chartErr.message}`,
+                  };
+                  setMessages((prev) => [...prev, aiMsg]);
+                  setIsProcessing(false);
+                  setProcessingPhase('idle');
+                  return;
                 }
               }
               
               const aiMsg: ExtendedMessage = {
                 id: `msg-${Date.now()}`,
                 role: 'assistant',
-                content: `${analysisResult.analysis || 'Analysis complete.'}${chartDesc}`,
-                chartImage: chartImages.length > 0 ? chartImages[0] : undefined,
-                chartImages: chartImages.length > 1 ? chartImages : undefined,
+                content: analysisResult.analysis || 'Analysis complete.',
               };
               setMessages((prev) => [...prev, aiMsg]);
               setIsProcessing(false);
