@@ -306,16 +306,17 @@ export const TypingIndicator: React.FC<{ phase?: string }> = ({ phase = 'thinkin
 export const WelcomeScreen: React.FC = () => {
   return (
     <div className="flex-1 flex flex-col items-center justify-center px-4 py-6 animate-fade-in">
-      <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-[#217346] to-[#185C37] flex items-center justify-center mb-3 shadow-lg shadow-[#217346]/20 animate-pulse-slow">
-        <svg className="w-7 h-7 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-[#217346] to-[#185C37] flex items-center justify-center mb-4 shadow-lg shadow-[#217346]/20 animate-pulse-slow">
+        <svg className="w-8 h-8 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
           <path d="M12 2L2 7l10 5 10-5-10-5z" />
           <path d="M2 17l10 5 10-5" />
           <path d="M2 12l10 5 10-5" />
         </svg>
       </div>
-      <h2 className="text-lg font-bold text-gray-900 mb-2">Cel</h2>
-      <p className="text-sm text-gray-500 text-center max-w-[260px] leading-relaxed">
-        Still writing formulas like it's the stone age?<br/>Just tell me what to do.
+      <h2 className="text-2xl font-bold text-gray-900 mb-1">Welcome to Cel</h2>
+      <p className="text-sm text-gray-500 mb-2">Your AI-powered Excel assistant</p>
+      <p className="text-xs text-gray-400 text-center max-w-[280px] leading-relaxed">
+        Describe what you need in plain English.<br/>I'll handle the rest.
       </p>
     </div>
   );
