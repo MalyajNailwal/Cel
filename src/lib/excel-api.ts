@@ -165,30 +165,26 @@ export async function getSheetData(sheetName: string, maxRows?: number): Promise
 
 export async function setValues(address: string, values: (string | number | boolean | null)[][], sheetName?: string): Promise<void> {
   await Excel.run(async (context) => {
-    let range: Excel.Range;
     let targetSheet: Excel.Worksheet;
     
     if (sheetName) {
-      try {
-        targetSheet = context.workbook.worksheets.getItem(sheetName);
-        targetSheet.load('name');
-        await context.sync();
-      } catch (sheetErr: any) {
-        console.error('[setValues] Sheet not found:', sheetName, sheetErr.message);
-        throw new Error(`Sheet "${sheetName}" not found. Available sheets: ${context.workbook.worksheets.items.map((s: any) => s.name).join(', ')}`);
-      }
-      range = targetSheet.getRange(address);
+      targetSheet = context.workbook.worksheets.getItem(sheetName);
     } else {
       targetSheet = context.workbook.worksheets.getActiveWorksheet();
-      targetSheet.load('name');
-      await context.sync();
-      range = targetSheet.getRange(address);
     }
 
-    const resizedRange = range.getRow(0).getColumn(0).getResizedRange(values.length - 1, (values[0]?.length || 1) - 1);
-    resizedRange.values = values;
+    const rowCount = values.length;
+    const colCount = values[0]?.length || 1;
+    let range: Excel.Range;
+    
+    if (address.includes(':')) {
+      range = targetSheet.getRange(address);
+    } else {
+      range = targetSheet.getRange(address).getResizedRange(rowCount - 1, colCount - 1);
+    }
+    
+    range.values = values;
     await context.sync();
-    console.log('[setValues] Success:', targetSheet.name, address, values.length, 'rows');
   });
 }
 

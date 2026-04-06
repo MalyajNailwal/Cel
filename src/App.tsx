@@ -558,6 +558,10 @@ export default function App() {
               executionResults.push({ action: step.action, success: false, output: 'Excel is not ready. Please refresh the add-in.' });
               continue;
             }
+
+            if (step.action === 'set_values' && lastCreatedSheet) {
+              await new Promise(r => setTimeout(r, 800));
+            }
             
             let retryCount = 0;
             let lastError = '';
@@ -743,14 +747,8 @@ async function executeStep(step: { action: string; params: Record<string, any>; 
     case 'get_selected_range': return JSON.stringify(await ExcelAPI.getSelectedRange());
     case 'get_range': return JSON.stringify(await ExcelAPI.getRange(params.address, params.sheet_name));
     case 'get_sheet_data': return JSON.stringify(await ExcelAPI.getSheetData(params.sheet_name, params.max_rows));
-    case 'set_values': 
-      console.log('[DEBUG] set_values params:', JSON.stringify({ address: params.address, sheet_name: params.sheet_name, values: params.values?.slice(0,2) }));
-      await ExcelAPI.setValues(params.address, params.values, params.sheet_name); 
-      return `Values written to ${params.address}`;
-    case 'set_formulas': 
-      console.log('[DEBUG] set_formulas params:', JSON.stringify({ address: params.address, sheet_name: params.sheet_name }));
-      await ExcelAPI.setFormulas(params.address, params.formulas, params.sheet_name); 
-      return `Formulas written to ${params.address}`;
+    case 'set_values': await ExcelAPI.setValues(params.address, params.values, params.sheet_name); return `Values written to ${params.address}`;
+    case 'set_formulas': await ExcelAPI.setFormulas(params.address, params.formulas, params.sheet_name); return `Formulas written to ${params.address}`;
     case 'apply_format': {
       const format = { address: params.address, sheetName: params.sheet_name, bold: params.bold, italic: params.italic, fontColor: params.font_color, fillColor: params.fill_color, fontSize: params.font_size, fontFamily: params.font_family, numberFormat: params.number_format, horizontalAlignment: params.horizontal_alignment, verticalAlignment: params.vertical_alignment, wrapText: params.wrap_text };
       await ExcelAPI.applyFormat(format);
