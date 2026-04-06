@@ -52,6 +52,18 @@ class AnalyzeRequest(BaseModel):
 class ChatResponse(BaseModel):
     content: str
     plan: list
+    reasoning: Optional[str] = None
+
+
+REASONING_PROMPT = """You are an Excel reasoning agent. Your job is to understand what the user wants and explain your thinking in simple terms.
+
+Analyze the user's request and explain:
+1. What they want (summary in 1-2 sentences)
+2. What data/operations are needed
+3. How you'll approach it (steps in order)
+4. Any considerations or notes
+
+Keep it conversational and clear. Use bullet points."""
 
 
 def setup_provider(provider: str, model: str, api_key: str):
@@ -950,11 +962,12 @@ async def chat(req: ChatRequest):
 
         setup_provider(req.provider, req.model, req.api_key)
 
-        planner = Agent(
-            role="Excel Task Planner",
-            goal="Create a precise, step-by-step JSON plan for Excel operations",
-            backstory=SYSTEM_PROMPT,
-            verbose=True,
+        # Step 1: Reasoning Agent - explains the approach first
+        reasoner = Agent(
+            role="Excel Reasoning Agent",
+            goal="Understand what user wants and explain the approach",
+            backstory=REASONING_PROMPT,
+            verbose=False,
             allow_delegation=False,
             llm=req.model,
         )
@@ -964,6 +977,46 @@ async def chat(req: ChatRequest):
         )
         selected_info = (
             f"Selected range: {req.selected_range}" if req.selected_range else ""
+        )
+
+        reasoning_task = Task(
+            description=f"""Analyze this user request and explain your thinking:
+            
+User: {req.message}
+{context_info}
+{selected_info}
+
+Explain in simple terms:
+1. What they want
+2. What data/operations needed
+3. How you'll approach it
+4. Any notes""",
+            expected_output="Clear explanation in bullet points",
+            agent=reasoner,
+        )
+
+        reasoning_crew = Crew(
+            agents=[reasoner],
+            tasks=[reasoning_task],
+            process=Process.sequential,
+            verbose=False,
+        )
+
+        reasoning_result = reasoning_crew.kickoff()
+        reasoning = (
+            str(reasoning_result.raw)
+            if hasattr(reasoning_result, "raw")
+            else str(reasoning_result)
+        )
+
+        # Step 2: Planner Agent - creates the execution plan
+        planner = Agent(
+            role="Excel Task Planner",
+            goal="Create a precise, step-by-step JSON plan for Excel operations",
+            backstory=SYSTEM_PROMPT,
+            verbose=False,
+            allow_delegation=False,
+            llm=req.model,
         )
 
         plan_task = Task(
@@ -980,7 +1033,7 @@ async def chat(req: ChatRequest):
             agents=[planner],
             tasks=[plan_task],
             process=Process.sequential,
-            verbose=True,
+            verbose=False,
         )
 
         result = crew.kickoff()
@@ -999,7 +1052,7 @@ async def chat(req: ChatRequest):
         except:
             response_text = output
 
-        return ChatResponse(content=response_text, plan=plan)
+        return ChatResponse(content=response_text, plan=plan, reasoning=reasoning)
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

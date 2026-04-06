@@ -144,6 +144,18 @@ export default function App() {
 
         const planData = await planResponse.json();
         const plan = planData.plan || [];
+        const reasoning = planData.reasoning;
+        
+        // Show reasoning if available
+        if (reasoning) {
+          const reasoningMsg: ExtendedMessage = {
+            id: `reasoning-${Date.now()}`,
+            role: 'assistant',
+            content: `Analyzing your request...\n\n${reasoning}`,
+          };
+          setMessages((prev) => [...prev, reasoningMsg]);
+        }
+        
         const { validSteps, validationErrors } = validatePlan(plan);
 
         // Parse selected range data for context awareness
