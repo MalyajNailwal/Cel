@@ -1,0 +1,316 @@
+import React, { useState, useCallback } from 'react';
+import { cn } from '@/lib/utils';
+import type { ChatMessage } from '@/lib/ai-providers';
+import type { ToolCall, ToolResult } from '@/lib/ai-providers';
+
+interface MessageBubbleProps {
+  message: ChatMessage;
+  toolCalls?: ToolCall[];
+  toolResults?: ToolResult[];
+  planSteps?: { action: string; params: Record<string, any>; description: string }[];
+  executionResults?: { action: string; success: boolean; output: string }[];
+}
+
+export const MessageBubble: React.FC<MessageBubbleProps> = ({
+  message,
+  toolCalls,
+  toolResults,
+  planSteps,
+  executionResults,
+}) => {
+  const isUser = message.role === 'user';
+
+  return (
+    <div className={cn('flex gap-2 mb-3 animate-slide-up', isUser ? 'flex-row-reverse' : 'flex-row')}>
+      <div
+        className={cn(
+          'flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold',
+          isUser
+            ? 'bg-gradient-to-br from-[#217346] to-[#185C37] text-white shadow-green'
+            : 'bg-gradient-to-br from-[#217346]/10 to-[#217346]/5 text-[#217346] ring-1 ring-[#217346]/10'
+        )}
+      >
+        {isUser ? (
+          <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" />
+            <circle cx="12" cy="7" r="4" />
+          </svg>
+        ) : (
+          <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M12 2L2 7l10 5 10-5-10-5z" />
+            <path d="M2 17l10 5 10-5" />
+            <path d="M2 12l10 5 10-5" />
+          </svg>
+        )}
+      </div>
+      <div className={cn('flex flex-col max-w-[85%] min-w-0', isUser ? 'items-end' : 'items-start')}>
+        {planSteps && planSteps.length > 0 && (
+          <AgentWorkflowDisplay steps={planSteps} results={executionResults || []} />
+        )}
+        {toolCalls && toolCalls.length > 0 && !planSteps && (
+          <ToolCallDisplay toolCalls={toolCalls} toolResults={toolResults} />
+        )}
+        <div
+          className={cn(
+            'px-3.5 py-2.5 text-[13px] leading-relaxed break-words overflow-wrap-anywhere whitespace-pre-wrap',
+            isUser
+              ? 'bg-gradient-to-br from-[#217346] to-[#185C37] text-white rounded-xl rounded-tr-sm shadow-green'
+              : 'bg-white text-gray-700 rounded-xl rounded-tl-sm border border-gray-200/80 shadow-soft'
+          )}
+        >
+          {message.content}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const AgentWorkflowDisplay: React.FC<{
+  steps: { action: string; params: Record<string, any>; description: string }[];
+  results: { action: string; success: boolean; output: string }[];
+}> = ({ steps, results }) => {
+  const [expanded, setExpanded] = useState(false);
+
+  const getActionColor = (action: string): string => {
+    if (action.startsWith('get_')) return 'from-blue-400 to-blue-500';
+    if (action.startsWith('set_') || action === 'auto_fill') return 'from-emerald-400 to-emerald-500';
+    if (action === 'apply_format') return 'from-amber-400 to-amber-500';
+    if (action === 'create_chart') return 'from-purple-400 to-purple-500';
+    return 'from-gray-400 to-gray-500';
+  };
+
+  const getActionIcon = (action: string): React.ReactNode => {
+    if (action.startsWith('get_')) return '📊';
+    if (action.startsWith('set_')) return '✏️';
+    if (action === 'apply_format') return '🎨';
+    if (action === 'create_chart') return '📈';
+    return '⚙️';
+  };
+
+  return (
+    <div className="mb-2 w-full max-w-full min-w-0 animate-scale-in">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg glass-green border border-[#217346]/10 text-[11px] text-[#217346] hover:bg-[#217346]/10 transition-all w-full"
+      >
+        <div className="flex items-center -space-x-1">
+          {steps.slice(0, 4).map((step, i) => {
+            const result = results[i];
+            return (
+              <div
+                key={i}
+                className={cn(
+                  'w-5 h-5 rounded-full bg-gradient-to-br flex items-center justify-center text-[8px] relative ring-2 ring-white',
+                  getActionColor(step.action)
+                )}
+              >
+                {getActionIcon(step.action)}
+                {result && (
+                  <div className={cn(
+                    'absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border border-white flex items-center justify-center text-[6px] font-bold',
+                    result.success ? 'bg-emerald-500 text-white' : 'bg-red-500 text-white'
+                  )}>
+                    {result.success ? '✓' : '✗'}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+          {steps.length > 4 && (
+            <div className="w-5 h-5 rounded-full bg-gray-200 flex items-center justify-center text-[8px] text-gray-500 ring-2 ring-white">
+              +{steps.length - 4}
+            </div>
+          )}
+        </div>
+        <span className="font-semibold ml-1">
+          {steps.length} step{steps.length > 1 ? 's' : ''}
+        </span>
+        <svg
+          className={cn('w-3 h-3 ml-auto transition-transform', expanded && 'rotate-180')}
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+        >
+          <path d="M6 9l6 6 6-6" />
+        </svg>
+      </button>
+      {expanded && (
+        <div className="mt-1 space-y-1 animate-fade-in">
+          {steps.map((step, i) => {
+            const result = results[i];
+            return (
+              <div key={i} className="bg-white rounded-lg border border-gray-200/80 overflow-hidden shadow-soft">
+                <div className={cn(
+                  'px-2.5 py-1.5 border-b flex items-center gap-2',
+                  result?.success ? 'bg-emerald-50/50 border-emerald-100/50' : 'bg-red-50/50 border-red-100/50'
+                )}>
+                  <div className={cn(
+                    'w-4 h-4 rounded-full flex items-center justify-center text-[8px] text-white',
+                    result?.success ? 'bg-emerald-500' : 'bg-red-500'
+                  )}>
+                    {result?.success ? '✓' : '✗'}
+                  </div>
+                  <span className="text-[11px] font-mono font-semibold text-gray-600">{step.action}</span>
+                </div>
+                <div className="px-2.5 py-1.5">
+                  <p className="text-[11px] text-gray-500">{step.description}</p>
+                  {result && (
+                    <pre className="text-[9px] font-mono text-gray-400 mt-0.5 overflow-x-auto max-h-16 whitespace-pre-wrap break-words">
+                      {result.output.length > 200 ? result.output.slice(0, 200) + '...' : result.output}
+                    </pre>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+};
+
+const ToolCallDisplay: React.FC<{
+  toolCalls: ToolCall[];
+  toolResults?: ToolResult[];
+}> = ({ toolCalls, toolResults }) => {
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <div className="mb-2 w-full max-w-full min-w-0 animate-scale-in">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-gray-50/80 border border-gray-200/80 text-[11px] text-gray-500 hover:bg-gray-100 transition-colors w-full"
+      >
+        <span className="text-[10px]">⚡</span>
+        <span className="font-medium">
+          {toolCalls.length} tool{toolCalls.length > 1 ? 's' : ''}
+        </span>
+        <svg
+          className={cn('w-3 h-3 ml-auto transition-transform', expanded && 'rotate-180')}
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+        >
+          <path d="M6 9l6 6 6-6" />
+        </svg>
+      </button>
+      {expanded && (
+        <div className="mt-1 space-y-1 animate-fade-in">
+          {toolCalls.map((tc, i) => {
+            const result = toolResults?.find((r) => r.tool_call_id === tc.id);
+            return (
+              <div key={tc.id} className="bg-white rounded-lg border border-gray-200/80 overflow-hidden shadow-soft">
+                <div className="px-2.5 py-1 bg-gray-50/80 border-b border-gray-100">
+                  <span className="text-[11px] font-mono font-semibold text-emerald-600">{tc.name}</span>
+                </div>
+                {result && (
+                  <pre className="px-2.5 py-1.5 text-[10px] font-mono text-gray-500 overflow-x-auto max-h-24 whitespace-pre-wrap break-words">
+                    {result.content.length > 300 ? result.content.slice(0, 300) + '...' : result.content}
+                  </pre>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+};
+
+export const TypingIndicator: React.FC<{ phase?: string }> = ({ phase = 'thinking' }) => {
+  const phaseLabels: Record<string, string> = {
+    thinking: 'Thinking...',
+    planning: 'Planning steps...',
+    executing: 'Working in Excel...',
+    validating: 'Validating results...',
+  };
+
+  const phaseColors: Record<string, string> = {
+    thinking: 'from-violet-400 to-violet-500',
+    planning: 'from-blue-400 to-blue-500',
+    executing: 'from-emerald-400 to-emerald-500',
+    validating: 'from-amber-400 to-amber-500',
+  };
+
+  return (
+    <div className="flex gap-2 mb-3 animate-slide-up">
+      <div className={cn('flex-shrink-0 w-7 h-7 rounded-full bg-gradient-to-br flex items-center justify-center text-[10px] font-bold text-white shadow-sm', phaseColors[phase] || phaseColors.thinking)}>
+        <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <path d="M12 2L2 7l10 5 10-5-10-5z" />
+          <path d="M2 17l10 5 10-5" />
+          <path d="M2 12l10 5 10-5" />
+        </svg>
+      </div>
+      <div className="px-3.5 py-2.5 rounded-xl rounded-tl-sm bg-white border border-gray-200/80 shadow-soft">
+        <p className="text-[11px] text-gray-400 font-medium mb-1">{phaseLabels[phase] || 'Processing...'}</p>
+        <div className="flex gap-1">
+          <div className="w-1.5 h-1.5 bg-gray-300 rounded-full animate-dot-pulse" style={{ animationDelay: '0ms' }} />
+          <div className="w-1.5 h-1.5 bg-gray-300 rounded-full animate-dot-pulse" style={{ animationDelay: '150ms' }} />
+          <div className="w-1.5 h-1.5 bg-gray-300 rounded-full animate-dot-pulse" style={{ animationDelay: '300ms' }} />
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export const WelcomeScreen: React.FC<{ onSuggestionClick: (text: string) => void }> = ({
+  onSuggestionClick,
+}) => {
+  const suggestions = [
+    {
+      icon: '📊',
+      title: 'Summarize selection',
+      text: 'Summarize the data in my selected range',
+    },
+    {
+      icon: '📈',
+      title: 'Create a chart',
+      text: 'Create a pie chart from the selected data',
+    },
+    {
+      icon: '🎨',
+      title: 'Format data',
+      text: 'Format the header row bold with a light blue background',
+    },
+    {
+      icon: '📋',
+      title: 'Workbook overview',
+      text: 'Tell me about all the sheets and tables in this workbook',
+    },
+  ];
+
+  return (
+    <div className="flex-1 flex flex-col items-center justify-center px-4 py-6 animate-fade-in">
+      <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-[#217346] to-[#185C37] flex items-center justify-center mb-3 shadow-lg shadow-[#217346]/20 animate-pulse-slow">
+        <svg className="w-7 h-7 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <path d="M12 2L2 7l10 5 10-5-10-5z" />
+          <path d="M2 17l10 5 10-5" />
+          <path d="M2 12l10 5 10-5" />
+        </svg>
+      </div>
+      <h2 className="text-lg font-bold text-gray-900 mb-0.5">Cel</h2>
+      <p className="text-xs text-gray-400 mb-6 text-center max-w-[220px]">
+        Agentic AI for Excel
+      </p>
+      <div className="grid grid-cols-1 gap-1.5 w-full max-w-[260px]">
+        {suggestions.map((s) => (
+          <button
+            key={s.title}
+            onClick={() => onSuggestionClick(s.text)}
+            className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl border border-gray-200/80 bg-white hover:border-[#217346]/30 hover:bg-[#217346]/[0.02] transition-all text-left group"
+          >
+            <div className="flex-shrink-0 w-8 h-8 rounded-lg bg-gray-50 group-hover:bg-[#217346]/5 flex items-center justify-center text-sm">
+              {s.icon}
+            </div>
+            <div>
+              <div className="text-[12px] font-semibold text-gray-700 group-hover:text-[#217346]">{s.title}</div>
+              <div className="text-[10px] text-gray-400 line-clamp-1">{s.text}</div>
+            </div>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+};
