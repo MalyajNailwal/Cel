@@ -555,8 +555,29 @@ export default function App() {
               executionResults.push({ action: step.action, success: false, output: 'Excel is not ready. Please refresh the add-in.' });
               continue;
             }
-            const result = await executeStep(fixedStep);
-            executionResults.push({ action: step.action, success: true, output: result });
+            
+            let retryCount = 0;
+            let lastError = '';
+            while (retryCount < 2) {
+              try {
+                const result = await executeStep(fixedStep);
+                executionResults.push({ action: step.action, success: true, output: result });
+                break;
+              } catch (error) {
+                lastError = error instanceof Error ? error.message : String(error);
+                
+                if (step.action === 'add_worksheet' && lastError.includes('already exists')) {
+                  knownSheets.add(params.name);
+                  executionResults.push({ action: step.action, success: true, output: `Using existing sheet "${params.name}"` });
+                  break;
+                }
+                
+                if (retryCount === 1) {
+                  executionResults.push({ action: step.action, success: false, output: lastError });
+                }
+                retryCount++;
+              }
+            }
           } catch (error) {
             const errMsg = error instanceof Error ? error.message : String(error);
             executionResults.push({ action: step.action, success: false, output: errMsg });
