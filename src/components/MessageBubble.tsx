@@ -317,9 +317,9 @@ export const WelcomeScreen: React.FC = () => {
         <div className="p-3 rounded-xl bg-gray-50 border border-gray-100">
           <p className="text-xs font-medium text-gray-500 mb-2">Try saying:</p>
           <div className="space-y-1.5">
-            <p className="text-sm text-gray-700">"Calculate total in column B"</p>
-            <p className="text-sm text-gray-700">"Create a chart from my data"</p>
-            <p className="text-sm text-gray-700">"Format this as a table"</p>
+            <p className="text-sm text-gray-700">"add a new sheet called Sales"</p>
+            <p className="text-sm text-gray-700">"sum of this column"</p>
+            <p className="text-sm text-gray-700">"show trends in this data"</p>
           </div>
         </div>
       </div>
