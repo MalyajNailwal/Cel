@@ -6,7 +6,7 @@ import { SettingsPanel } from '@/components/SettingsPanel';
 import type { ChatMessage, AIProvider } from '@/lib/ai-providers';
 import * as ExcelAPI from '@/lib/excel-api';
 
-type ProcessingPhase = 'idle' | 'thinking' | 'planning' | 'analyzing' | 'executing' | 'validating';
+type ProcessingPhase = 'idle' | 'thinking' | 'reasoning' | 'planning' | 'analyzing' | 'executing' | 'validating';
 
 interface Settings {
   provider: AIProvider;
@@ -38,7 +38,8 @@ interface SelectedRangeInfo {
 
 const PHASE_CONFIG: Record<ProcessingPhase, { label: string; color: string; accent: string }> = {
   idle: { label: '', color: '', accent: '' },
-  thinking: { label: 'Thinking...', color: 'text-violet-600', accent: 'from-violet-500 to-purple-600' },
+  thinking: { label: 'Understanding...', color: 'text-violet-600', accent: 'from-violet-500 to-purple-600' },
+  reasoning: { label: 'Thinking...', color: 'text-indigo-600', accent: 'from-indigo-500 to-purple-600' },
   planning: { label: 'Planning steps...', color: 'text-blue-600', accent: 'from-blue-500 to-indigo-600' },
   analyzing: { label: 'Analyzing data...', color: 'text-cyan-600', accent: 'from-cyan-500 to-blue-600' },
   executing: { label: 'Working in Excel...', color: 'text-emerald-600', accent: 'from-emerald-500 to-teal-600' },
@@ -146,14 +147,17 @@ export default function App() {
         const plan = planData.plan || [];
         const reasoning = planData.reasoning;
         
-        // Show reasoning if available
+        // Show reasoning as a message
         if (reasoning) {
+          setProcessingPhase('reasoning');
+          const cleanReasoning = reasoning.replace(/\*/g, '').trim();
           const reasoningMsg: ExtendedMessage = {
             id: `reasoning-${Date.now()}`,
             role: 'assistant',
-            content: `Analyzing your request...\n\n${reasoning}`,
+            content: cleanReasoning,
           };
           setMessages((prev) => [...prev, reasoningMsg]);
+          setTimeout(scrollToBottom, 100);
         }
         
         const { validSteps, validationErrors } = validatePlan(plan);
@@ -967,9 +971,9 @@ export default function App() {
             <div
               className={cn('h-full rounded-full transition-all duration-500')}
               style={{
-                width: processingPhase === 'thinking' ? '25%' : processingPhase === 'planning' ? '50%' : processingPhase === 'executing' ? '75%' : '95%',
+                width: processingPhase === 'thinking' || processingPhase === 'reasoning' ? '25%' : processingPhase === 'planning' ? '50%' : processingPhase === 'executing' ? '75%' : '95%',
                 background: `linear-gradient(90deg, ${
-                  processingPhase === 'thinking' ? '#8b5cf6, #a78bfa' :
+                  processingPhase === 'thinking' || processingPhase === 'reasoning' ? '#8b5cf6, #a78bfa' :
                   processingPhase === 'planning' ? '#3b82f6, #60a5fa' :
                   processingPhase === 'executing' ? '#10b981, #34d399' :
                   '#f59e0b, #fbbf24'
