@@ -336,91 +336,81 @@ export default function App() {
                   const endColIdx = endColMatch ? endColMatch[1].charCodeAt(0) - 65 : startColIdx;
                   const numCols = headers.length;
 
-                  // Smart column detection - check values to determine type
+                  // Fully dynamic column detection - analyze actual data values
                   const numericCols: number[] = [];
                   const categoricalCols: number[] = [];
-                  for (let i = 0; i < headers.length; i++) {
-                    const h = headers[i].toLowerCase();
-                    if (/name|id|blood|gender|status|department|region|product|city|category|activity|date|month/i.test(h)) {
-                      categoricalCols.push(i);
-                    } else if (/age|hemoglobin|rbc|wbc|platelets|salary|revenue|score|quantity|price|count|amount|total|bp|sugar|cholesterol|triglycerides|creatinine|urea|sgot|sgpt|tsh|vitamin|iron|ferritin|hours|sales|units|titles|wins/i.test(h)) {
-                      numericCols.push(i);
-                    } else {
-                      const sampleVal = rows[Math.min(2, rows.length - 1)]?.[i];
-                      if (sampleVal !== undefined && sampleVal !== null) {
-                        const isNum = !isNaN(Number(String(sampleVal).replace(/[^0-9.-]/g, '')));
-                        if (isNum) numericCols.push(i);
-                        else categoricalCols.push(i);
-                      }
-                    }
-                  }
-
-                  // Check if user mentioned specific columns (AFTER full sheet fetch)
-                  // Use synonym mapping for common terms
-                  const columnSynonyms: Record<string, string[]> = {
-                    'wins': ['wins', 'total titles', 'titles', 'trophies', 'championships'],
-                    'titles': ['wins', 'total titles', 'titles', 'trophies', 'championships'],
-                    'sales': ['sales', 'revenue', 'amount', 'price', 'quantity'],
-                    'revenue': ['sales', 'revenue', 'amount', 'price', 'income'],
-                    'salary': ['salary', 'pay', 'compensation', 'wage', 'income'],
-                    'age': ['age', 'years', 'old'],
-                    'score': ['score', 'marks', 'grade', 'points'],
-                    'count': ['count', 'total', 'number', 'quantity'],
-                    'total': ['total', 'sum', 'count', 'amount'],
-                  };
                   
-                  let userMentionedCols: number[] = [];
                   for (let i = 0; i < headers.length; i++) {
-                    const h = headers[i].toLowerCase();
-                    const words = h.split(/\s+/);
-                    // Check direct word match
-                    let matchCount = words.filter((w: string) => userMessage.toLowerCase().includes(w)).length;
-                    // Check synonym match
-                    if (matchCount === 0) {
-                      for (const [synonym, keywords] of Object.entries(columnSynonyms)) {
-                        if (userMessage.toLowerCase().includes(synonym)) {
-                          const headerMatch = keywords.some(kw => h.includes(kw) || kw.includes(h));
-                          if (headerMatch) {
-                            matchCount = 1;
-                            break;
-                          }
-                        }
+                    let numCount = 0;
+                    let catCount = 0;
+                    const sampleSize = Math.min(10, rows.length);
+                    
+                    for (let j = 0; j < sampleSize; j++) {
+                      const val = rows[j]?.[i];
+                      if (val === undefined || val === null || val === '') continue;
+                      const strVal = String(val).replace(/[^0-9.-]/g, '');
+                      if (!isNaN(Number(strVal)) && strVal !== '') {
+                        numCount++;
+                      } else {
+                        catCount++;
                       }
                     }
-                    if (matchCount > 0) {
-                      userMentionedCols.push(i);
+                    
+                    if (numCount > catCount) numericCols.push(i);
+                    else categoricalCols.push(i);
+                  }
+
+                  // Dynamic user column detection - extract from user's message itself
+                  // Parse "X vs Y", "X and Y", "X vs the Y" patterns
+                  let userMentionedCols: number[] = [];
+                  const userMsgLower = userMessage.toLowerCase();
+                  
+                  // Extract column names from user message - remove common words
+                  const skipWords = ['bar', 'graph', 'chart', 'pie', 'line', 'make', 'create', 'show', 'display', 'the', 'a', 'an', 'of', 'to', 'for', 'between', 'with', 'on', 'in', 'and', 'vs', 'versus'];
+                  const userWords = userMsgLower.split(/\s+/).filter(w => !skipWords.includes(w) && w.length > 1);
+                  
+                  // Match each user word against actual headers
+                  for (let i = 0; i < headers.length; i++) {
+                    const h = headers[i].toLowerCase();
+                    for (const userWord of userWords) {
+                      // Fuzzy match: header contains word OR word matches part of header
+                      if (h.includes(userWord) || userWord.includes(h) || 
+                          h.split(/\s+/).some((hw: string) => hw.startsWith(userWord.slice(0, 3)) || userWord.startsWith(hw.slice(0, 3)))) {
+                        userMentionedCols.push(i);
+                        break;
+                      }
                     }
                   }
 
-                  // Extract AI-recommended columns from analysis response
+                  // Dynamic AI-recommended column extraction - match column names from analysis
                   let aiRecommendedCols: number[] = [];
                   if (analysisResult.analysis) {
                     const analysisText = analysisResult.analysis.toLowerCase();
-                    const vsPatterns = [
-                      /(["']?)([\w\s]+?)\1\s+(?:vs|versus|and|&)\s+["']?([\w\s]+?)["']?\s+(?:would|make|good|chart|graph)/i,
-                      /(["']?)([\w\s]+?)\1\s+(?:vs|versus|and|&)\s+["']?([\w\s]+?)["']?$/im,
-                    ];
-                    for (const pattern of vsPatterns) {
-                      const match = analysisText.match(pattern);
-                      if (match) {
-                        const col1 = match[2].trim().toLowerCase();
-                        const col2 = match[3].trim().toLowerCase();
-                        for (let i = 0; i < headers.length; i++) {
-                          const h = headers[i].toLowerCase();
-                          if (h === col1 || h.includes(col1) || col1.includes(h)) aiRecommendedCols.push(i);
-                          else if (h === col2 || h.includes(col2) || col2.includes(h)) aiRecommendedCols.push(i);
+                    
+                    // Look for "X vs Y" or "X and Y" patterns for chart recommendations
+                    const vsMatch = analysisText.match(/(?:vs|versus|and|by)\s+([a-z\s]+?)(?:\s+(?:would|make|good|best)|$)/i);
+                    if (vsMatch) {
+                      const targetCol = vsMatch[1].trim().toLowerCase();
+                      for (let i = 0; i < headers.length; i++) {
+                        const h = headers[i].toLowerCase();
+                        if (h.includes(targetCol) || targetCol.includes(h)) {
+                          aiRecommendedCols.push(i);
                         }
-                        if (aiRecommendedCols.length >= 2) break;
                       }
                     }
+                    
+                    // If no vs pattern, find any column names mentioned in analysis
                     if (aiRecommendedCols.length < 2) {
                       for (let i = 0; i < headers.length; i++) {
                         const h = headers[i].toLowerCase();
-                        const words = h.split(/\s+/);
-                        const matchCount = words.filter((w: string) => analysisText.includes(w)).length;
-                        if (matchCount >= Math.min(words.length, 2)) {
-                          aiRecommendedCols.push(i);
+                        const words = h.split(/\s+/).filter((w: string) => w.length > 2);
+                        for (const word of words) {
+                          if (analysisText.includes(word) && !aiRecommendedCols.includes(i)) {
+                            aiRecommendedCols.push(i);
+                            break;
+                          }
                         }
+                        if (aiRecommendedCols.length >= 2) break;
                       }
                     }
                   }
