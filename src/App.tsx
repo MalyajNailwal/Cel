@@ -355,12 +355,38 @@ export default function App() {
                     }
                   }
 
-                  // Check if user mentioned specific columns
+                  // Check if user mentioned specific columns (AFTER full sheet fetch)
+                  // Use synonym mapping for common terms
+                  const columnSynonyms: Record<string, string[]> = {
+                    'wins': ['wins', 'total titles', 'titles', 'trophies', 'championships'],
+                    'titles': ['wins', 'total titles', 'titles', 'trophies', 'championships'],
+                    'sales': ['sales', 'revenue', 'amount', 'price', 'quantity'],
+                    'revenue': ['sales', 'revenue', 'amount', 'price', 'income'],
+                    'salary': ['salary', 'pay', 'compensation', 'wage', 'income'],
+                    'age': ['age', 'years', 'old'],
+                    'score': ['score', 'marks', 'grade', 'points'],
+                    'count': ['count', 'total', 'number', 'quantity'],
+                    'total': ['total', 'sum', 'count', 'amount'],
+                  };
+                  
                   let userMentionedCols: number[] = [];
                   for (let i = 0; i < headers.length; i++) {
                     const h = headers[i].toLowerCase();
                     const words = h.split(/\s+/);
-                    const matchCount = words.filter((w: string) => userMessage.toLowerCase().includes(w)).length;
+                    // Check direct word match
+                    let matchCount = words.filter((w: string) => userMessage.toLowerCase().includes(w)).length;
+                    // Check synonym match
+                    if (matchCount === 0) {
+                      for (const [synonym, keywords] of Object.entries(columnSynonyms)) {
+                        if (userMessage.toLowerCase().includes(synonym)) {
+                          const headerMatch = keywords.some(kw => h.includes(kw) || kw.includes(h));
+                          if (headerMatch) {
+                            matchCount = 1;
+                            break;
+                          }
+                        }
+                      }
+                    }
                     if (matchCount > 0) {
                       userMentionedCols.push(i);
                     }
