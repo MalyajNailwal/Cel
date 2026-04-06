@@ -263,9 +263,12 @@ export default function App() {
             knownSheets.delete(sheetToDelete);
           }
 
-          if (lastCreatedSheet && !lastDeletedSheet && !params.sheet_name &&
+          if (lastCreatedSheet && !lastDeletedSheet &&
               step.action !== 'add_worksheet' && step.action !== 'get_workbook_structure' && step.action !== 'get_selected_range') {
-            params.sheet_name = lastCreatedSheet;
+            if (!params.sheet_name || params.sheet_name === 'Sheet1' || params.sheet_name === 'Sheet') {
+              params.sheet_name = lastCreatedSheet;
+              validationErrors.push(`Step ${i + 1}: Using newly created sheet "${lastCreatedSheet}"`);
+            }
           }
 
           const A1_REGEX = /^[A-Z]{1,3}\d+(:[A-Z]{1,3}\d+)?$/;
