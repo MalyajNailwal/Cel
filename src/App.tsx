@@ -26,6 +26,7 @@ interface ExtendedMessage extends ChatMessage {
   executionResults?: { action: string; success: boolean; output: string }[];
   chartImage?: string;
   chartImages?: string[];
+  isReasoning?: boolean;
 }
 
 interface SelectedRangeInfo {
@@ -166,6 +167,7 @@ export default function App() {
             id: `reasoning-${Date.now()}`,
             role: 'assistant',
             content: cleanReasoning,
+            isReasoning: true,
           };
           setMessages((prev) => [...prev, reasoningMsg]);
           setTimeout(scrollToBottom, 100);
@@ -1027,6 +1029,7 @@ export default function App() {
                 executionResults={(msg as any).executionResults}
                 chartImage={(msg as any).chartImage}
                 chartImages={(msg as any).chartImages}
+                isReasoning={(msg as any).isReasoning}
               />
             ))}
             {isProcessing && <TypingIndicator phase={processingPhase} />}

@@ -11,6 +11,7 @@ interface MessageBubbleProps {
   executionResults?: { action: string; success: boolean; output: string }[];
   chartImage?: string;
   chartImages?: string[];
+  isReasoning?: boolean;
 }
 
 export const MessageBubble: React.FC<MessageBubbleProps> = ({
@@ -21,15 +22,50 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   executionResults,
   chartImage,
   chartImages,
+  isReasoning,
 }) => {
   const isUser = message.role === 'user';
   const [copied, setCopied] = useState(false);
+  const [expanded, setExpanded] = useState(false);
 
   const handleCopy = useCallback(() => {
     navigator.clipboard.writeText(message.content);
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   }, [message.content]);
+
+  if (isReasoning) {
+    return (
+      <div className="flex gap-2 mb-3 animate-slide-up">
+        <div className="flex-shrink-0 w-7 h-7 rounded-full bg-gradient-to-br from-indigo-500 to-purple-500 flex items-center justify-center">
+          <svg className="w-3.5 h-3.5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M12 2a10 10 0 1 0 10 10H12V2z" />
+            <path d="M12 2a10 10 0 0 1 10 10" />
+            <circle cx="12" cy="12" r="3" />
+          </svg>
+        </div>
+        <div className="flex flex-col max-w-[85%] min-w-0">
+          <button
+            onClick={() => setExpanded(!expanded)}
+            className="flex items-center gap-2 px-3 py-2 rounded-xl bg-indigo-50 border border-indigo-100 text-[11px] text-indigo-600 hover:bg-indigo-100 transition-all w-full text-left"
+          >
+            <svg className="w-3.5 h-3.5 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+            </svg>
+            <span className="font-medium">Thinking</span>
+            <svg className={cn('w-3 h-3 ml-auto transition-transform', expanded && 'rotate-180')} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M6 9l6 6 6-6" />
+            </svg>
+          </button>
+          {expanded && (
+            <div className="mt-1 px-3 py-2.5 rounded-xl bg-indigo-50/50 border border-indigo-100/50 text-[12px] text-gray-600 leading-relaxed whitespace-pre-wrap animate-fade-in">
+              {message.content}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className={cn('flex gap-2 mb-3 animate-slide-up', isUser ? 'flex-row-reverse' : 'flex-row')}>
