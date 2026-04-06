@@ -1,15 +1,11 @@
 [
   {
     "op": "update",
-    "id": "019d5f0c-8769-7da8-ad21-bc8adb18a2cc",
-    "content": "Excel Add-in Sideload (macOS): Two methods — (1) Manual: copy manifest.xml to `~/Library/Containers/com.microsoft.Excel/Data/Documents/wef/` (create if missing), open Excel → Insert → My Add-ins → Browse → select manifest.xml. (2) CLI: `npx office-addin-debugging start manifest.xml desktop --app excel`. If add-in doesn't appear, fully quit Excel (Cmd+Q) and clear WebKit + Caches: `rm -rf ~/Library/Containers/com.microsoft.Excel/Data/Library/WebKit/ && rm -rf ~/Library/Containers/com.microsoft.Excel/Data/Library/Caches/WebKit/`, then reopen Excel. Note: CLI method has unreliable npm dependencies — fall back to manual wef sideloading if it fails."
+    "id": "019d61bb-94ee-7777-afd7-ed7fe18876e2",
+    "content": "Chart creation must use exact selected range, not default to row 1: Extract startRow from selected range's startCell (e.g., 'A15' → '15'), use exact range `${colLetter}${startRow}:${colLetter}${endRow}`. Also: (1) seriesBy must be 'Columns' not 'Auto' - use `'Columns'` in sheet.charts.add(); (2) Add column offset when range doesn't start at A - parse startColIdx from address, compute adjusted column letters; (3) All charts need ≥2 columns (labels + values); (4) Use else-if chains for chart types (`isPieRequest`, `isBarRequest`, `isLineRequest`) to prevent multiple charts; (5) Always use full selected range for chart data, never individual columns. These fixes prevent wrong column auto-selection after chart creation."
   },
   {
     "op": "delete",
-    "id": "019d5f41-ff33-775c-8c11-746be7e4ff8f"
-  },
-  {
-    "op": "delete",
-    "id": "019d5f10-d928-7b2e-b829-bbafa8ac3a4c"
+    "id": "019d6193-e2c3-7572-b92c-dfd4c1c0d658"
   }
 ]

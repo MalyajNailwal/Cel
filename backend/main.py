@@ -494,28 +494,17 @@ async def analyze_large_data(req: AnalyzeRequest):
 
         stats = compute_large_data_stats(req.data)
 
-        ANALYSIS_TASK = f"""You are a Large Data Analyst. Analyze this dataset and answer: {req.question}
+        ANALYSIS_TASK = f"""Analyze briefly (3-5 points max):
 
-Dataset Overview:
-- Total Rows: {stats.get("overview", {}).get("total_rows", "N/A")}
-- Total Columns: {stats.get("overview", {}).get("total_columns", "N/A")}
-- Headers: {stats.get("overview", {}).get("headers", [])}
+Rows: {stats.get("overview", {}).get("total_rows", "N/A")}
+Columns: {stats.get("overview", {}).get("total_columns", "N/A")}
+Headers: {stats.get("overview", {}).get("headers", [])}
 
-Column Statistics:
-{json.dumps(stats.get("columns", {}), indent=2)}
+Stats: {json.dumps(stats.get("columns", {}), indent=None)}
 
-Provide clear, actionable insights. Focus on:
-1. Key findings from the numbers
-2. Any patterns or trends
-3. Important observations
-4. Recommendations if applicable
+Answer: {req.question}
 
-IMPORTANT - At the end, always suggest 2-3 chart types that would best visualize this data:
-
-💡 **Chart Suggestions:**
-- 🥧 Pie Chart: Best for [column_name] - shows distribution/proportions
-- 📊 Bar Chart: Best for [column_name] - compares values
-- 📈 Line Chart: Best for [column_name] - shows trends"""
+Keep it short. No asterisks (*)."""
 
         analyst = Agent(
             role="Large Data Analyst",
@@ -1077,16 +1066,19 @@ async def analyze_data(req: AnalyzeRequest):
             "distribution": distribution,
         }
 
-        ANALYSIS_AGENT_PROMPT = """You are an expert data analyst. You analyze Excel data and provide clear, actionable insights."""
-        ANALYSIS_TASK = f"""Analyze this data and answer: {req.question}
+        ANALYSIS_AGENT_PROMPT = (
+            """You are a concise data analyst. Give brief, point-wise insights."""
+        )
+        ANALYSIS_TASK = f"""Analyze briefly (3-5 points max):
 
-Data headers: {req.headers}
-Data shape: {len(req.data)} rows, {len(req.data[0]) if req.data else 0} columns
+Headers: {req.headers}
+Data: {len(req.data)} rows
 
-Statistical analysis:
-{json.dumps(analysis_results, indent=2)}
+Stats: {json.dumps(stats, indent=None)}
 
-Provide a clear, comprehensive analysis in natural language. Highlight key findings, patterns, and any concerns."""
+Answer: {req.question}
+
+Keep it short, no asterisks (*)."""
 
         analyst = Agent(
             role="Data Analyst",
