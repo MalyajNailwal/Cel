@@ -306,21 +306,22 @@ export const TypingIndicator: React.FC<{ phase?: string }> = ({ phase = 'thinkin
 export const WelcomeScreen: React.FC = () => {
   return (
     <div className="flex-1 flex flex-col items-center justify-center px-8 py-12 animate-fade-in">
-      <div className="relative mb-6">
-        <div className="absolute inset-0 bg-gradient-to-br from-[#217346] to-[#185C37] rounded-3xl blur-lg opacity-30 scale-110" />
-        <div className="w-20 h-20 rounded-3xl bg-gradient-to-br from-[#217346] to-[#185C37] flex items-center justify-center shadow-xl shadow-[#217346]/30 relative">
-          <svg className="w-10 h-10 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M12 2L2 7l10 5 10-5-10-5z" />
-            <path d="M2 17l10 5 10-5" />
-            <path d="M2 12l10 5 10-5" />
-          </svg>
+      <div className="relative mb-8">
+        <div className="absolute inset-0 bg-gradient-to-br from-[#217346] via-[#2d8a52] to-[#185C37] rounded-2xl blur-xl opacity-40 scale-125" />
+        <div className="relative px-10 py-4 bg-gradient-to-br from-[#217346] to-[#185C37] rounded-2xl shadow-2xl shadow-[#217346]/40">
+          <span className="text-5xl font-black text-white tracking-tight" style={{ fontFamily: 'system-ui, -apple-system, sans-serif', letterSpacing: '-0.02em' }}>
+            Cel
+          </span>
         </div>
       </div>
-      <h2 className="text-3xl font-bold text-gray-900 mb-2 tracking-tight">Cel</h2>
-      <p className="text-base text-gray-600 text-center max-w-[320px] leading-relaxed font-medium">
+      <h2 className="text-2xl font-semibold text-gray-800 mb-2">Your Excel Assistant</h2>
+      <p className="text-base text-gray-500 text-center max-w-[320px] leading-relaxed">
         Tell me what to do.<br/>Consider it done.
       </p>
-      <p className="text-xs text-gray-400 mt-4">Start typing below...</p>
+      <div className="mt-8 flex items-center gap-2 text-xs text-gray-400">
+        <div className="w-2 h-2 rounded-full bg-[#217346] animate-pulse" />
+        <span>Ready when you are</span>
+      </div>
     </div>
   );
 };
