@@ -560,7 +560,7 @@ export default function App() {
           const params = { ...step.params };
 
           // CRITICAL: Force selected range for write operations when user refers to selection
-          console.log('[EXECUTION] userWantsSelected:', userWantsSelected, '| selectedRange:', selectedRange, '| step.action:', step.action, '| original params:', { address: params.address, sheet_name: params.sheet_name });
+          console.log('[EXECUTION] Final check - userWantsSelected:', userWantsSelected, '| react selectedRange state:', selectedRange, '| step.action:', step.action, '| original params:', { address: params.address, sheet_name: params.sheet_name });
           if (userWantsSelected && selectedRange) {
             const writeActions = ['set_values', 'set_formulas', 'apply_format', 'create_chart', 'create_table', 'sort_range', 'auto_fill'];
             if (writeActions.includes(step.action)) {
