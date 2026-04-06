@@ -23,6 +23,13 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   chartImages,
 }) => {
   const isUser = message.role === 'user';
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = useCallback(() => {
+    navigator.clipboard.writeText(message.content);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  }, [message.content]);
 
   return (
     <div className={cn('flex gap-2 mb-3 animate-slide-up', isUser ? 'flex-row-reverse' : 'flex-row')}>
@@ -54,15 +61,38 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
         {toolCalls && toolCalls.length > 0 && !planSteps && (
           <ToolCallDisplay toolCalls={toolCalls} toolResults={toolResults} />
         )}
-        <div
-          className={cn(
-            'px-3.5 py-2.5 text-[13px] leading-relaxed break-words overflow-wrap-anywhere whitespace-pre-wrap',
-            isUser
-              ? 'bg-gradient-to-br from-[#217346] to-[#185C37] text-white rounded-xl rounded-tr-sm shadow-green'
-              : 'bg-white text-gray-700 rounded-xl rounded-tl-sm border border-gray-200/80 shadow-soft'
+        <div className="group relative">
+          <div
+            className={cn(
+              'px-3.5 py-2.5 text-[13px] leading-relaxed break-words overflow-wrap-anywhere whitespace-pre-wrap',
+              isUser
+                ? 'bg-gradient-to-br from-[#217346] to-[#185C37] text-white rounded-xl rounded-tr-sm shadow-green'
+                : 'bg-white text-gray-700 rounded-xl rounded-tl-sm border border-gray-200/80 shadow-soft'
+            )}
+          >
+            {message.content}
+          </div>
+          {isUser && (
+            <button
+              onClick={handleCopy}
+              className={cn(
+                'absolute top-1 right-1 p-1.5 rounded-md transition-all opacity-0 group-hover:opacity-100',
+                copied ? 'bg-emerald-500 text-white' : 'bg-white/90 text-gray-500 hover:text-[#217346] hover:bg-white'
+              )}
+              title={copied ? 'Copied!' : 'Copy'}
+            >
+              {copied ? (
+                <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+              ) : (
+                <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <rect x="9" y="9" width="13" height="13" rx="2" />
+                  <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
+                </svg>
+              )}
+            </button>
           )}
-        >
-          {message.content}
         </div>
         {chartImages && chartImages.length > 1 && (
           <div className="mt-2 space-y-3">
