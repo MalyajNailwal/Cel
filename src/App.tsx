@@ -302,20 +302,15 @@ export default function App() {
                     }
                   }
 
+                  const startRow = startCell.match(/\d+/)?.[0] || '1';
+                  const endRow = endCell.match(/(\d+)$/)?.[1] || '100';
+
                   const createChartForColumn = async (colIdx: number, chartType: string, title: string) => {
                     const colLetter = String.fromCharCode(65 + startColIdx + colIdx);
-                    const endRowMatch = endCell.match(/(\d+)$/);
-                    const endRow = endRowMatch ? endRowMatch[1] : '100';
-                    const chartRange = `${colLetter}1:${colLetter}${endRow}`;
-                    try {
-                      await ExcelAPI.createChart(chartType, chartRange, sheetName, title);
-                      chartsCreated++;
-                      chartDesc += `📊 ${chartType} chart: ${title}\n`;
-                    } catch (e) {
-                      await ExcelAPI.createChart(chartType, address, sheetName, title);
-                      chartsCreated++;
-                      chartDesc += `📊 ${chartType} chart: ${title}\n`;
-                    }
+                    const chartRange = `${colLetter}${startRow}:${colLetter}${endRow}`;
+                    await ExcelAPI.createChart(chartType, chartRange, sheetName, title);
+                    chartsCreated++;
+                    chartDesc += `📊 ${chartType} chart: ${title}\n`;
                   };
 
                   const createChartWithTwoColumns = async (col1Idx: number, col2Idx: number, chartType: string, title: string) => {
@@ -323,9 +318,7 @@ export default function App() {
                     const maxCol = startColIdx + Math.max(col1Idx, col2Idx);
                     const startLetter = String.fromCharCode(65 + minCol);
                     const endLetter = String.fromCharCode(65 + maxCol);
-                    const endRowMatch = endCell.match(/(\d+)$/);
-                    const endRow = endRowMatch ? endRowMatch[1] : '100';
-                    const chartRange = `${startLetter}1:${endLetter}${endRow}`;
+                    const chartRange = `${startLetter}${startRow}:${endLetter}${endRow}`;
                     await ExcelAPI.createChart(chartType, chartRange, sheetName, title);
                     chartsCreated++;
                     chartDesc += `📊 ${chartType} chart: ${title}\n`;
@@ -341,9 +334,7 @@ export default function App() {
                     } else {
                       await createChartForColumn(0, 'pie', `${headers[0]} Distribution`);
                     }
-                  }
-
-                  if (isBarRequest) {
+                  } else if (isBarRequest) {
                     if (numericCols.length > 0 && categoricalCols.length > 0) {
                       await createChartWithTwoColumns(categoricalCols[0], numericCols[0], 'column', `${headers[numericCols[0]]} by ${headers[categoricalCols[0]]}`);
                     } else if (numericCols.length > 0) {
@@ -353,9 +344,7 @@ export default function App() {
                     } else {
                       await createChartForColumn(0, 'column', `${headers[0]} Distribution`);
                     }
-                  }
-
-                  if (isLineRequest) {
+                  } else if (isLineRequest) {
                     if (numericCols.length > 0 && categoricalCols.length > 0) {
                       await createChartWithTwoColumns(categoricalCols[0], numericCols[0], 'line', `${headers[numericCols[0]]} Trend`);
                     } else if (numericCols.length > 0 && numCols >= 2) {
@@ -367,9 +356,7 @@ export default function App() {
                     } else {
                       await createChartForColumn(0, 'line', `${headers[0]} Trend`);
                     }
-                  }
-
-                  if (!isPieRequest && !isBarRequest && !isLineRequest) {
+                  } else {
                     if (numericCols.length > 0 && categoricalCols.length > 0) {
                       await createChartWithTwoColumns(categoricalCols[0], numericCols[0], 'column', `${headers[numericCols[0]]} by ${headers[categoricalCols[0]]}`);
                     } else if (numericCols.length > 0) {
