@@ -558,19 +558,15 @@ export default function App() {
           const params = { ...step.params };
 
           // CRITICAL: Force selected range for write operations when user refers to selection
-          console.log('[EXECUTION] userWantsSelected:', userWantsSelected, '| selectedRange:', selectedRange, '| step.action:', step.action);
+          console.log('[EXECUTION] userWantsSelected:', userWantsSelected, '| selectedRange:', selectedRange, '| step.action:', step.action, '| original params:', { address: params.address, sheet_name: params.sheet_name });
           if (userWantsSelected && selectedRange) {
             const writeActions = ['set_values', 'set_formulas', 'apply_format', 'create_chart', 'create_table', 'sort_range', 'auto_fill'];
             if (writeActions.includes(step.action)) {
               console.log('[EXECUTION] Overwriting params with selected range:', selectedRange.address, selectedRange.sheetName);
-              if (!params.address || params.address !== selectedRange.address) {
-                params.address = selectedRange.address;
-                validationErrors.push(`Step ${i + 1}: Using selected range "${selectedRange.address}" as target`);
-              }
-              if (!params.sheet_name || params.sheet_name !== selectedRange.sheetName) {
-                params.sheet_name = selectedRange.sheetName;
-                validationErrors.push(`Step ${i + 1}: Using selected sheet "${selectedRange.sheetName}"`);
-              }
+              // ALWAYS force to selected sheet and address for "put here" type requests
+              params.address = selectedRange.address;
+              params.sheet_name = selectedRange.sheetName;
+              validationErrors.push(`Step ${i + 1}: Using selected range "${selectedRange.address}" in "${selectedRange.sheetName}"`);
             }
             // For charts, use selected range as data source
             if (step.action === 'create_chart' && !params.data_range) {
@@ -1179,9 +1175,13 @@ async function executeStep(step: { action: string; params: Record<string, any>; 
     case 'get_range': return JSON.stringify(await ExcelAPI.getRange(params.address, params.sheet_name));
     case 'get_sheet_data': return JSON.stringify(await ExcelAPI.getSheetData(params.sheet_name, params.max_rows));
     case 'set_values': 
-      console.log('[EXECUTION] set_values called with:', { address: params.address, values: params.values?.length, sheet_name: params.sheet_name });
+      console.log('[EXECUTION] set_values called with:', { address: params.address, sheet_name: params.sheet_name, valuesRows: params.values?.length });
       await ExcelAPI.setValues(params.address, params.values, params.sheet_name); 
-      return `Values written to ${params.address}`;
+      return `Values written to ${params.address} in ${params.sheet_name}`;
+    case 'create_table': 
+      console.log('[EXECUTION] create_table called with:', { address: params.address, name: params.name, sheet_name: params.sheet_name });
+      await ExcelAPI.createTable(params.address, params.name, params.sheet_name); 
+      return `Created table "${params.name}" at ${params.address} in ${params.sheet_name}`;
     case 'set_formulas': await ExcelAPI.setFormulas(params.address, params.formulas, params.sheet_name); return `Formulas written to ${params.address}`;
     case 'apply_format': {
       const format = { address: params.address, sheetName: params.sheet_name, bold: params.bold, italic: params.italic, fontColor: params.font_color, fillColor: params.fill_color, fontSize: params.font_size, fontFamily: params.font_family, numberFormat: params.number_format, horizontalAlignment: params.horizontal_alignment, verticalAlignment: params.vertical_alignment, wrapText: params.wrap_text };
