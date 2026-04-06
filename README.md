@@ -1,4 +1,4 @@
-# Cal - Excel AI Agent
+# Cel - Excel AI Agent
 
 An intelligent Excel add-in powered by AI agents that lets you chat with your spreadsheets.
 
