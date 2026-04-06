@@ -97,17 +97,18 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
         {toolCalls && toolCalls.length > 0 && !planSteps && (
           <ToolCallDisplay toolCalls={toolCalls} toolResults={toolResults} />
         )}
-        <div className="group relative">
-          <div
-            className={cn(
-              'px-3.5 py-2.5 text-[13px] leading-relaxed break-words overflow-wrap-anywhere whitespace-pre-wrap',
-              isUser
-                ? 'bg-gradient-to-br from-[#217346] to-[#185C37] text-white rounded-xl rounded-tr-sm shadow-green'
-                : 'bg-white text-gray-700 rounded-xl rounded-tl-sm border border-gray-200/80 shadow-soft'
-            )}
-          >
-            {message.content}
-          </div>
+        {message.content ? (
+          <div className="group relative">
+            <div
+              className={cn(
+                'px-3.5 py-2.5 text-[13px] leading-relaxed break-words overflow-wrap-anywhere whitespace-pre-wrap',
+                isUser
+                  ? 'bg-gradient-to-br from-[#217346] to-[#185C37] text-white rounded-xl rounded-tr-sm shadow-green'
+                  : 'bg-white text-gray-700 rounded-xl rounded-tl-sm border border-gray-200/80 shadow-soft'
+              )}
+            >
+              {message.content}
+            </div>
           {isUser && (
             <button
               onClick={handleCopy}
@@ -130,6 +131,15 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
             </button>
           )}
         </div>
+        ) : (
+          <div className="px-3.5 py-2.5 rounded-xl rounded-tl-sm bg-white border border-gray-200/80 shadow-soft animate-pulse">
+            <div className="space-y-1.5">
+              <div className="h-3 bg-gray-200 rounded-full w-3/4" />
+              <div className="h-3 bg-gray-200 rounded-full w-5/6" />
+              <div className="h-3 bg-gray-200 rounded-full w-2/3" />
+            </div>
+          </div>
+        )}
         {chartImages && chartImages.length > 1 && (
           <div className="mt-2 space-y-3">
             {chartImages.map((img, idx) => (
@@ -152,7 +162,23 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
 const AgentWorkflowDisplay: React.FC<{
   steps: { action: string; params: Record<string, any>; description: string }[];
   results: { action: string; success: boolean; output: string }[];
-}> = ({ steps, results }) => {
+  loading?: boolean;
+}> = ({ steps, results, loading }) => {
+  if (loading) {
+    return (
+      <div className="mb-2 w-full max-w-full min-w-0 animate-pulse">
+        <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-gray-100 border border-gray-200">
+          <div className="flex items-center -space-x-1">
+            {[0, 1, 2].map((i) => (
+              <div key={i} className="w-5 h-5 rounded-full bg-gray-200 ring-2 ring-white" />
+            ))}
+          </div>
+          <div className="h-3 bg-gray-200 rounded-full w-16" />
+        </div>
+      </div>
+    );
+  }
+
   const [expanded, setExpanded] = useState(false);
 
   const getActionColor = (action: string): string => {
@@ -257,7 +283,33 @@ const AgentWorkflowDisplay: React.FC<{
 const ToolCallDisplay: React.FC<{
   toolCalls: ToolCall[];
   toolResults?: ToolResult[];
-}> = ({ toolCalls, toolResults }) => {
+  loading?: boolean;
+}> = ({ toolCalls, toolResults, loading }) => {
+  if (loading) {
+    return (
+      <div className="mb-2 w-full max-w-full min-w-0 animate-pulse">
+        <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-gray-100 border border-gray-200">
+          <div className="w-3 h-3 bg-gray-200 rounded" />
+          <div className="h-3 bg-gray-200 rounded-full w-20" />
+          <svg className="w-3 h-3 ml-auto text-gray-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M6 9l6 6 6-6" />
+          </svg>
+        </div>
+        <div className="mt-1 space-y-1">
+          <div className="bg-white rounded-lg border border-gray-200/80 overflow-hidden">
+            <div className="px-2.5 py-1 bg-gray-50/80 border-b border-gray-100">
+              <div className="h-3 bg-gray-200 rounded-full w-24" />
+            </div>
+            <div className="px-2.5 py-1.5">
+              <div className="h-2 bg-gray-200 rounded-full w-full" />
+              <div className="h-2 bg-gray-200 rounded-full w-3/4 mt-1" />
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   const [expanded, setExpanded] = useState(false);
 
   return (
