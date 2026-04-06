@@ -328,12 +328,16 @@ export async function deleteColumns(address: string, count: number, sheetName?: 
 
 export async function addWorksheet(name: string): Promise<void> {
   await Excel.run(async (context) => {
+    const normalizedName = name.trim().slice(0, 31);
+    
+    if (!normalizedName || /[\/?*\[\]:]/.test(normalizedName)) {
+      throw new Error(`Invalid sheet name "${name}". Avoid characters: / ? * [ ] :`);
+    }
+
     const existingSheets = context.workbook.worksheets;
     existingSheets.load('items/name');
     await context.sync();
 
-    const normalizedName = name.trim();
-    
     const sheetExists = existingSheets.items.some(
       (s: any) => s.name.toLowerCase() === normalizedName.toLowerCase()
     );
@@ -342,8 +346,16 @@ export async function addWorksheet(name: string): Promise<void> {
       throw new Error(`Sheet "${normalizedName}" already exists`);
     }
 
-    context.workbook.worksheets.add(normalizedName);
-    await context.sync();
+    try {
+      const newSheet = context.workbook.worksheets.add(normalizedName);
+      newSheet.load('name');
+      await context.sync();
+    } catch (addError: any) {
+      if (addError.message && addError.message.includes('argument')) {
+        throw new Error(`Cannot create sheet "${normalizedName}" - name may be invalid or already in use`);
+      }
+      throw addError;
+    }
   });
 }
 

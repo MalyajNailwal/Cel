@@ -243,7 +243,11 @@ export default function App() {
               params.name = `Sheet_${Date.now()}`;
               validationErrors.push(`Step ${i + 1}: Missing sheet name — auto-generated "${params.name}"`);
             }
-            params.name = params.name.replace(/[\\/?*\[\]:]/g, '_').slice(0, 31);
+            params.name = params.name.replace(/[\/?*\[\]:]/g, '_').trim().slice(0, 31);
+            if (!params.name || params.name.length === 0) {
+              params.name = `Sheet_${Date.now()}`;
+              validationErrors.push(`Step ${i + 1}: Invalid sheet name after sanitization — auto-generated "${params.name}"`);
+            }
             lastCreatedSheet = params.name;
             lastDeletedSheet = null;
             knownSheets.add(params.name);
