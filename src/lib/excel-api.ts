@@ -328,7 +328,21 @@ export async function deleteColumns(address: string, count: number, sheetName?: 
 
 export async function addWorksheet(name: string): Promise<void> {
   await Excel.run(async (context) => {
-    context.workbook.worksheets.add(name);
+    const existingSheets = context.workbook.worksheets;
+    existingSheets.load('items/name');
+    await context.sync();
+
+    const normalizedName = name.trim();
+    
+    const sheetExists = existingSheets.items.some(
+      (s: any) => s.name.toLowerCase() === normalizedName.toLowerCase()
+    );
+
+    if (sheetExists) {
+      throw new Error(`Sheet "${normalizedName}" already exists`);
+    }
+
+    context.workbook.worksheets.add(normalizedName);
     await context.sync();
   });
 }
