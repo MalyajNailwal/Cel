@@ -800,9 +800,9 @@ export default function App() {
               }
             }
             
-            if (step.action === 'create_table' && lastCreatedSheet && !params.sheet_name) {
+            if (step.action === 'create_table' && lastCreatedSheet) {
               params.sheet_name = lastCreatedSheet;
-              validationErrors.push(`Step ${i + 1}: Using sheet "${lastCreatedSheet}" for table`);
+              validationErrors.push(`Step ${i + 1}: Force using sheet "${lastCreatedSheet}" for table`);
             }
             
             let retryCount = 0;

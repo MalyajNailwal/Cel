@@ -391,10 +391,14 @@ export async function deleteWorksheet(sheetName: string): Promise<void> {
 }
 
 export async function createTable(address: string, name: string, sheetName?: string): Promise<void> {
+  console.log('[createTable] Called with:', { address, name, sheetName });
   await Excel.run(async (context) => {
     const sheet = sheetName
       ? context.workbook.worksheets.getItem(sheetName)
       : context.workbook.worksheets.getActiveWorksheet();
+    sheet.load('name');
+    await context.sync();
+    console.log('[createTable] Using sheet:', sheet.name);
     const range = sheet.getRange(address);
     sheet.tables.add(range, true);
     await context.sync();
