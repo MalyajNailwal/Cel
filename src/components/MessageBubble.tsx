@@ -303,27 +303,7 @@ export const TypingIndicator: React.FC<{ phase?: string }> = ({ phase = 'thinkin
   );
 };
 
-export const WelcomeScreen: React.FC<{ onSuggestionClick: (text: string) => void }> = ({
-  onSuggestionClick,
-}) => {
-  const suggestions = [
-    {
-      icon: '✨',
-      title: 'Ask anything',
-      text: 'any task',
-    },
-    {
-      icon: '📊',
-      title: 'Chart it',
-      text: 'create charts instantly',
-    },
-    {
-      icon: '🧮',
-      title: 'Formulas? No',
-      text: 'just tell me what to calc',
-    },
-  ];
-
+export const WelcomeScreen: React.FC = () => {
   return (
     <div className="flex-1 flex flex-col items-center justify-center px-4 py-6 animate-fade-in">
       <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-[#217346] to-[#185C37] flex items-center justify-center mb-3 shadow-lg shadow-[#217346]/20 animate-pulse-slow">
@@ -333,27 +313,10 @@ export const WelcomeScreen: React.FC<{ onSuggestionClick: (text: string) => void
           <path d="M2 12l10 5 10-5" />
         </svg>
       </div>
-      <h2 className="text-lg font-bold text-gray-900 mb-0.5">Cel</h2>
-      <p className="text-xs text-gray-400 mb-6 text-center max-w-[220px]">
-        Still typing =SUM(A1:A10)? just ask me ✨
+      <h2 className="text-lg font-bold text-gray-900 mb-2">Cel</h2>
+      <p className="text-sm text-gray-500 text-center max-w-[260px] leading-relaxed">
+        Still using Excel like it's 1999? <br/>Just tell me what you want ✨
       </p>
-      <div className="grid grid-cols-1 gap-1.5 w-full max-w-[260px]">
-        {suggestions.map((s) => (
-          <button
-            key={s.title}
-            onClick={() => onSuggestionClick(s.text)}
-            className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl border border-gray-200/80 bg-white hover:border-[#217346]/30 hover:bg-[#217346]/[0.02] transition-all text-left group"
-          >
-            <div className="flex-shrink-0 w-8 h-8 rounded-lg bg-gray-50 group-hover:bg-[#217346]/5 flex items-center justify-center text-sm">
-              {s.icon}
-            </div>
-            <div>
-              <div className="text-[12px] font-semibold text-gray-700 group-hover:text-[#217346]">{s.title}</div>
-              <div className="text-[10px] text-gray-400 line-clamp-1">{s.text}</div>
-            </div>
-          </button>
-        ))}
-      </div>
     </div>
   );
 };

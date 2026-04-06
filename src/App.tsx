@@ -957,7 +957,7 @@ export default function App() {
         }}
       >
         {messages.length === 0 ? (
-          <WelcomeScreen onSuggestionClick={handleSend} />
+          <WelcomeScreen />
         ) : (
           <>
             {messages.map((msg) => (
