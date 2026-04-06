@@ -315,7 +315,7 @@ export const WelcomeScreen: React.FC = () => {
       </div>
       <h2 className="text-lg font-bold text-gray-900 mb-2">Cel</h2>
       <p className="text-sm text-gray-500 text-center max-w-[260px] leading-relaxed">
-        Still using Excel like it's 1999? <br/>Just tell me what you want ✨
+        Still writing formulas like it's the stone age?<br/>Just tell me what to do.
       </p>
     </div>
   );
