@@ -337,10 +337,26 @@ export default function App() {
                   let aiRecommendedCols: number[] = [];
                   if (analysisResult.analysis) {
                     const analysisText = analysisResult.analysis.toLowerCase();
-                    for (let i = 0; i < headers.length; i++) {
-                      const h = headers[i].toLowerCase();
-                      if (analysisText.includes(h) || analysisText.includes(h.replace(/\s+/g, ''))) {
-                        aiRecommendedCols.push(i);
+                    // Look for "X vs Y" or "X and Y" patterns
+                    const vsMatch = analysisText.match(/(["']?)([^"']+?)\1\s+(?:vs|and|&)\s+["']?([^"'\n.]+)["']?/i);
+                    if (vsMatch) {
+                      const col1 = vsMatch[2].trim().toLowerCase();
+                      const col2 = vsMatch[3].trim().toLowerCase();
+                      for (let i = 0; i < headers.length; i++) {
+                        const h = headers[i].toLowerCase();
+                        if (h === col1 || h.includes(col1) || col1.includes(h)) aiRecommendedCols.push(i);
+                        else if (h === col2 || h.includes(col2) || col2.includes(h)) aiRecommendedCols.push(i);
+                      }
+                    }
+                    // Fallback: find columns mentioned in context
+                    if (aiRecommendedCols.length < 2) {
+                      for (let i = 0; i < headers.length; i++) {
+                        const h = headers[i].toLowerCase();
+                        const words = h.split(/\s+/);
+                        const matchCount = words.filter((w: string) => analysisText.includes(w)).length;
+                        if (matchCount >= Math.min(words.length, 2)) {
+                          aiRecommendedCols.push(i);
+                        }
                       }
                     }
                   }
