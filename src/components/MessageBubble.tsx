@@ -310,8 +310,11 @@ export const WelcomeScreen: React.FC = () => {
         <span className="text-2xl font-bold text-white">C</span>
       </div>
       <h2 className="text-xl font-bold text-gray-900 mb-1">Cel</h2>
-      <p className="text-sm text-gray-500 text-center">
+      <p className="text-sm text-gray-500 text-center mb-6">
         Tell me what to do. Consider it done.
+      </p>
+      <p className="text-xs text-gray-400 text-center">
+        Try: "sum of column A" or "make a pie chart" or "bold the header"
       </p>
     </div>
   );
