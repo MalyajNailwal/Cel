@@ -50,6 +50,7 @@ export default function App() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingPhase, setProcessingPhase] = useState<ProcessingPhase>('idle');
   const [showSettings, setShowSettings] = useState(false);
+  const [showScrollDown, setShowScrollDown] = useState(false);
   const [selectedRange, setSelectedRange] = useState<SelectedRangeInfo | null>(null);
   const [settings, setSettings] = useState<Settings>(() => {
     try {
@@ -943,7 +944,18 @@ export default function App() {
       )}
 
       {/* Chat Area */}
-      <div className="flex-1 overflow-y-auto px-3 py-3 bg-gradient-to-b from-gray-50/60 to-white min-h-0" style={{ overflowY: 'auto' }}>
+      <div 
+        className="flex-1 overflow-y-auto px-3 py-3 bg-gradient-to-b from-gray-50/60 to-white min-h-0 relative"
+        style={{ overflowY: 'auto' }}
+        ref={(el) => {
+          if (el) {
+            el.onscroll = () => {
+              const diff = el.scrollHeight - el.scrollTop - el.clientHeight;
+              setShowScrollDown(diff > 100);
+            };
+          }
+        }}
+      >
         {messages.length === 0 ? (
           <WelcomeScreen onSuggestionClick={handleSend} />
         ) : (
@@ -962,6 +974,18 @@ export default function App() {
           </>
         )}
         <div ref={messagesEndRef} />
+        
+        {/* Scroll to bottom button */}
+        {showScrollDown && (
+          <button
+            onClick={scrollToBottom}
+            className="absolute bottom-4 right-4 w-8 h-8 rounded-full bg-[#217346] text-white shadow-lg flex items-center justify-center hover:bg-[#185C37] active:scale-95 transition-all"
+          >
+            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M6 9l6 6 6-6" />
+            </svg>
+          </button>
+        )}
       </div>
 
       {/* Premium Input */}
