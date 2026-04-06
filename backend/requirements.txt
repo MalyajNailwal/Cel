@@ -6,3 +6,5 @@ pydantic
 python-dotenv
 matplotlib
 numpy
+pandas
+scipy

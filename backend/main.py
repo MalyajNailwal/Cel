@@ -344,52 +344,106 @@ def analyze_distribution(data: List[List[Any]]) -> dict:
 
 def compute_large_data_stats(data: List[List[Any]]) -> dict:
     """Compute comprehensive statistics for large datasets efficiently."""
+    try:
+        import pandas as pd
+        import numpy as np
+
+        if not data or not data[0]:
+            return {"error": "No data to analyze"}
+
+        headers = data[0] if len(data) > 0 else []
+        rows = data[1:] if len(data) > 1 else []
+        total_rows = len(rows)
+
+        df = pd.DataFrame(rows, columns=headers[: len(rows[0])] if rows else headers)
+
+        results = {
+            "overview": {
+                "total_rows": total_rows,
+                "total_columns": len(headers),
+                "headers": list(headers),
+            },
+            "columns": {},
+        }
+
+        for col in df.columns:
+            if pd.api.types.is_numeric_dtype(df[col]):
+                col_data = df[col].dropna()
+                if len(col_data) > 0:
+                    results["columns"][col] = {
+                        "count": int(col_data.count()),
+                        "sum": round(float(col_data.sum()), 2),
+                        "average": round(float(col_data.mean()), 2),
+                        "min": round(float(col_data.min()), 2),
+                        "max": round(float(col_data.max()), 2),
+                        "range": round(float(col_data.max() - col_data.min()), 2),
+                        "median": round(float(col_data.median()), 2),
+                        "std_dev": round(float(col_data.std()), 2)
+                        if len(col_data) > 1
+                        else 0,
+                        "q1": round(float(col_data.quantile(0.25)), 2),
+                        "q3": round(float(col_data.quantile(0.75)), 2),
+                        "iqr": round(
+                            float(col_data.quantile(0.75) - col_data.quantile(0.25)), 2
+                        ),
+                    }
+            else:
+                results["columns"][col] = {
+                    "count": int(df[col].count()),
+                    "unique_count": int(df[col].nunique()),
+                    "top_values": df[col].value_counts().head(5).to_dict(),
+                    "is_numeric": False,
+                }
+
+        return results
+
+    except ImportError:
+        # Fallback to basic implementation without pandas
+        return _compute_large_data_stats_basic(data)
+
+
+def _compute_large_data_stats_basic(data: List[List[Any]]) -> dict:
+    """Fallback basic stats without pandas."""
     if not data or not data[0]:
         return {"error": "No data to analyze"}
 
-    headers = data[0] if len(data) > 0 else []
-    rows = data[1:] if len(data) > 1 else []
+    headers = data[0]
+    rows = data[1:]
     total_rows = len(rows)
 
     results = {
         "overview": {
             "total_rows": total_rows,
             "total_columns": len(headers),
-            "headers": headers,
+            "headers": list(headers),
         },
         "columns": {},
     }
 
     for col_idx in range(len(headers)):
-        col_name = (
-            headers[col_idx] if col_idx < len(headers) else f"Column_{col_idx + 1}"
-        )
+        col_name = headers[col_idx]
         col_values = []
-
         for row in rows:
-            if col_idx < len(row):
-                val = row[col_idx]
-                if val is not None and val != "":
-                    try:
-                        num = float(
-                            str(val)
+            if col_idx < len(row) and row[col_idx] not in [None, ""]:
+                try:
+                    col_values.append(
+                        float(
+                            str(row[col_idx])
                             .replace(",", "")
                             .replace("₹", "")
                             .replace("$", "")
-                            .replace("€", "")
                             .strip()
                         )
-                        col_values.append(num)
-                    except (ValueError, TypeError):
-                        pass
+                    )
+                except:
+                    pass
 
         if col_values:
+            n = len(col_values)
             sorted_vals = sorted(col_values)
-            n = len(sorted_vals)
             mid = n // 2
-
             results["columns"][col_name] = {
-                "count": len(col_values),
+                "count": n,
                 "sum": round(sum(col_values), 2),
                 "average": round(sum(col_values) / n, 2),
                 "min": round(min(col_values), 2),
@@ -409,13 +463,6 @@ def compute_large_data_stats(data: List[List[Any]]) -> dict:
                 if n > 1
                 else 0,
             }
-
-            if n >= 10:
-                q1 = sorted_vals[n // 4]
-                q3 = sorted_vals[3 * n // 4]
-                results["columns"][col_name]["q1"] = round(q1, 2)
-                results["columns"][col_name]["q3"] = round(q3, 2)
-                results["columns"][col_name]["iqr"] = round(q3 - q1, 2)
 
     return results
 
