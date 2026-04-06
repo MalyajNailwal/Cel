@@ -80,6 +80,29 @@ export const ChatInput: React.FC<ChatInputProps> = ({
 
   return (
     <div className="flex-shrink-0 border-t border-gray-200/60 glass px-3 py-2.5">
+      {/* Reasoning toggle row */}
+      <div className="flex items-center justify-between mb-2">
+        <button
+          onClick={toggleReasoning}
+          className={cn(
+            'flex items-center gap-1.5 px-2 py-1 rounded-md text-[10px] font-medium transition-all',
+            reasoning 
+              ? 'bg-[#217346]/10 text-[#217346] border border-[#217346]/20' 
+              : 'bg-gray-100 text-gray-400 border border-gray-200'
+          )}
+        >
+          <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M12 2a10 10 0 1 0 10 10H12V2z" />
+            <path d="M12 2a10 10 0 0 1 10 10" />
+            <circle cx="12" cy="12" r="3" />
+          </svg>
+          {reasoning ? 'Think' : 'Fast'}
+        </button>
+        <span className="text-[9px] text-gray-400">
+          {reasoning ? 'Detailed thinking on' : 'Quick response'}
+        </span>
+      </div>
+      
       <div className="flex items-end gap-2 bg-gray-50/80 rounded-xl border border-gray-200/80 focus-within:border-[#217346]/40 focus-within:ring-2 focus-within:ring-[#217346]/10 transition-all duration-200 px-3 py-2 shadow-soft">
         <div className="flex-1 min-w-0">
           {rangePreview && (
@@ -107,28 +130,10 @@ export const ChatInput: React.FC<ChatInputProps> = ({
           />
         </div>
         
-        {/* Reasoning Toggle */}
-        <button
-          onClick={toggleReasoning}
-          title={reasoning ? 'Thinking enabled' : 'Thinking disabled'}
-          className={cn(
-            'p-1.5 rounded-md transition-all self-center',
-            reasoning 
-              ? 'text-[#217346] bg-[#217346]/10 hover:bg-[#217346]/20' 
-              : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
-          )}
-        >
-          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M12 2a10 10 0 1 0 10 10H12V2z" />
-            <path d="M12 2a10 10 0 0 1 10 10" />
-            <circle cx="12" cy="12" r="3" />
-          </svg>
-        </button>
-        
         {input && !disabled && (
           <button
             onClick={handleCancel}
-            title="Cancel / Clear"
+            title="Clear"
             className="p-1.5 rounded-md text-gray-400 hover:text-red-500 hover:bg-red-50 transition-all"
           >
             <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -141,13 +146,13 @@ export const ChatInput: React.FC<ChatInputProps> = ({
           onClick={handleSubmit}
           disabled={!input.trim() || disabled}
           className={cn(
-            'flex-shrink-0 w-7 h-7 rounded-lg flex items-center justify-center transition-all duration-200 self-end',
+            'flex-shrink-0 w-8 h-8 rounded-lg flex items-center justify-center transition-all duration-200 self-end',
             input.trim() && !disabled
               ? 'bg-gradient-to-br from-[#217346] to-[#185C37] text-white shadow-green hover:shadow-md active:scale-95'
               : 'bg-gray-200/80 text-gray-400 cursor-not-allowed'
           )}
         >
-          <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
             <path d="M5 12h14M12 5l7 7-7 7" />
           </svg>
         </button>
