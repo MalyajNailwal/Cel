@@ -321,7 +321,7 @@ export default function App() {
                     const h = headers[i].toLowerCase();
                     if (/name|id|blood|gender|status|department|region|product|city|category|activity|date|month/i.test(h)) {
                       categoricalCols.push(i);
-                    } else if (/age|hemoglobin|rbc|wbc|platelets|salary|revenue|score|quantity|price|count|amount|total|bp|sugar|cholesterol|triglycerides|creatinine|urea|sgot|sgpt|tsh|vitamin|iron|ferritin|hours|sales|units|titles/i.test(h)) {
+                    } else if (/age|hemoglobin|rbc|wbc|platelets|salary|revenue|score|quantity|price|count|amount|total|bp|sugar|cholesterol|triglycerides|creatinine|urea|sgot|sgpt|tsh|vitamin|iron|ferritin|hours|sales|units|titles|wins/i.test(h)) {
                       numericCols.push(i);
                     } else {
                       const sampleVal = rows[Math.min(2, rows.length - 1)]?.[i];
@@ -333,11 +333,21 @@ export default function App() {
                     }
                   }
 
+                  // Check if user mentioned specific columns
+                  let userMentionedCols: number[] = [];
+                  for (let i = 0; i < headers.length; i++) {
+                    const h = headers[i].toLowerCase();
+                    const words = h.split(/\s+/);
+                    const matchCount = words.filter((w: string) => userMessage.toLowerCase().includes(w)).length;
+                    if (matchCount > 0) {
+                      userMentionedCols.push(i);
+                    }
+                  }
+
                   // Extract AI-recommended columns from analysis response
                   let aiRecommendedCols: number[] = [];
                   if (analysisResult.analysis) {
                     const analysisText = analysisResult.analysis.toLowerCase();
-                    // Look for "X vs Y" pattern with word boundaries
                     const vsPatterns = [
                       /(["']?)([\w\s]+?)\1\s+(?:vs|versus|and|&)\s+["']?([\w\s]+?)["']?\s+(?:would|make|good|chart|graph)/i,
                       /(["']?)([\w\s]+?)\1\s+(?:vs|versus|and|&)\s+["']?([\w\s]+?)["']?$/im,
@@ -355,7 +365,6 @@ export default function App() {
                         if (aiRecommendedCols.length >= 2) break;
                       }
                     }
-                    // Fallback: find columns mentioned in context
                     if (aiRecommendedCols.length < 2) {
                       for (let i = 0; i < headers.length; i++) {
                         const h = headers[i].toLowerCase();
@@ -365,18 +374,6 @@ export default function App() {
                           aiRecommendedCols.push(i);
                         }
                       }
-                    }
-                  }
-
-                  // Check if user mentioned specific columns
-                  let userMentionedCols: number[] = [];
-                  for (let i = 0; i < headers.length; i++) {
-                    const h = headers[i].toLowerCase();
-                    const words = h.split(/\s+/);
-                    // Check if any word from header appears in user message
-                    const matchCount = words.filter((w: string) => userMessage.toLowerCase().includes(w)).length;
-                    if (matchCount > 0) {
-                      userMentionedCols.push(i);
                     }
                   }
 
@@ -407,7 +404,6 @@ export default function App() {
                                        aiRecommendedCols.length >= 2 ? aiRecommendedCols : [];
 
                   if (effectiveCols.length >= 2) {
-                    // Use AI/user recommended columns
                     const catCol = effectiveCols.find(c => categoricalCols.includes(c)) ?? effectiveCols[0];
                     const numCol = effectiveCols.find(c => numericCols.includes(c)) ?? effectiveCols[1];
                     if (isPieRequest) {
