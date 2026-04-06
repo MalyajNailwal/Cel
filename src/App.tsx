@@ -52,6 +52,7 @@ export default function App() {
   const [processingPhase, setProcessingPhase] = useState<ProcessingPhase>('idle');
   const [showSettings, setShowSettings] = useState(false);
   const [showScrollDown, setShowScrollDown] = useState(false);
+  const [reasoningEnabled, setReasoningEnabled] = useState(true);
   const [selectedRange, setSelectedRange] = useState<SelectedRangeInfo | null>(null);
   const [settings, setSettings] = useState<Settings>(() => {
     try {
@@ -135,6 +136,7 @@ export default function App() {
             api_key: apiKey,
             workbook_context: workbookContext,
             selected_range: selectedRangeData,
+            enable_reasoning: reasoningEnabled,
           }),
         });
 
@@ -147,8 +149,8 @@ export default function App() {
         const plan = planData.plan || [];
         const reasoning = planData.reasoning;
         
-        // Show reasoning as a message
-        if (reasoning) {
+        // Show reasoning as a message (only if enabled)
+        if (reasoningEnabled && reasoning) {
           setProcessingPhase('reasoning');
           const cleanReasoning = reasoning.replace(/\*/g, '').trim();
           const reasoningMsg: ExtendedMessage = {
@@ -909,10 +911,17 @@ export default function App() {
     [settings, getApiKey]
   );
 
-  const handleSend = useCallback((text: string) => {
+  const handleSend = useCallback((text: string, enableReasoning?: boolean) => {
+    if (enableReasoning !== undefined) {
+      setReasoningEnabled(enableReasoning);
+    }
     processMessage(text);
     setTimeout(scrollToBottom, 100);
   }, [processMessage, scrollToBottom]);
+
+  const handleToggleReasoning = useCallback((enabled: boolean) => {
+    setReasoningEnabled(enabled);
+  }, []);
 
   const handleSettingsSave = useCallback((newSettings: Settings) => {
     setSettings(newSettings);
@@ -1030,7 +1039,13 @@ export default function App() {
       </div>
 
       {/* Premium Input */}
-      <ChatInput onSend={handleSend} disabled={isProcessing} selectedRange={selectedRange} />
+      <ChatInput 
+        onSend={handleSend} 
+        disabled={isProcessing} 
+        selectedRange={selectedRange}
+        reasoningEnabled={reasoningEnabled}
+        onToggleReasoning={handleToggleReasoning}
+      />
 
       {showSettings && (
         <SettingsPanel

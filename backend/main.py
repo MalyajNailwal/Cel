@@ -30,6 +30,7 @@ class ChatRequest(BaseModel):
     api_key: str
     workbook_context: Optional[str] = None
     selected_range: Optional[str] = None
+    enable_reasoning: Optional[bool] = True
 
 
 class ExecuteRequest(BaseModel):
@@ -962,16 +963,6 @@ async def chat(req: ChatRequest):
 
         setup_provider(req.provider, req.model, req.api_key)
 
-        # Step 1: Reasoning Agent - explains the approach first
-        reasoner = Agent(
-            role="Excel Reasoning Agent",
-            goal="Understand what user wants and explain the approach",
-            backstory=REASONING_PROMPT,
-            verbose=False,
-            allow_delegation=False,
-            llm=req.model,
-        )
-
         context_info = (
             f"Workbook context: {req.workbook_context}" if req.workbook_context else ""
         )
@@ -979,35 +970,58 @@ async def chat(req: ChatRequest):
             f"Selected range: {req.selected_range}" if req.selected_range else ""
         )
 
-        reasoning_task = Task(
-            description=f"""Analyze this user request and explain your thinking:
-            
+        # Only run reasoning agent if enabled
+        reasoning = ""
+        if req.enable_reasoning or req.enable_reasoning is None:
+            reasoner = Agent(
+                role="Excel Reasoning Agent",
+                goal="Understand what user wants and explain the approach in clear, concise way",
+                backstory="""You are a thoughtful Excel assistant. Your job is to understand user requests quickly and explain your thinking in simple, jargon-free language. 
+
+IMPORTANT:
+- Keep responses short and clear (2-4 sentences for summary, 3-4 bullet points for approach)
+- Use plain language, no technical jargon
+- No asterisks or markdown formatting
+- Focus on what user wants, not implementation details
+- If request is simple (like "sum A1:A10"), just say what you'll do in one sentence
+- If complex (like "analyze 1000 rows and make chart"), break into clear steps""",
+                verbose=False,
+                allow_delegation=False,
+                llm=req.model,
+            )
+
+            reasoning_task = Task(
+                description=f"""Analyze this user request briefly:
+
 User: {req.message}
 {context_info}
 {selected_info}
 
-Explain in simple terms:
-1. What they want
-2. What data/operations needed
-3. How you'll approach it
-4. Any notes""",
-            expected_output="Clear explanation in bullet points",
-            agent=reasoner,
-        )
+Explain simply:
+1. What they want (1 sentence)
+2. Steps to do it (2-3 bullets)
+3. Any important notes
 
-        reasoning_crew = Crew(
-            agents=[reasoner],
-            tasks=[reasoning_task],
-            process=Process.sequential,
-            verbose=False,
-        )
+Keep it short and clear. No asterisks.""",
+                expected_output="Short explanation, no markdown",
+                agent=reasoner,
+            )
 
-        reasoning_result = reasoning_crew.kickoff()
-        reasoning = (
-            str(reasoning_result.raw)
-            if hasattr(reasoning_result, "raw")
-            else str(reasoning_result)
-        )
+            reasoning_crew = Crew(
+                agents=[reasoner],
+                tasks=[reasoning_task],
+                process=Process.sequential,
+                verbose=False,
+            )
+
+            reasoning_result = reasoning_crew.kickoff()
+            reasoning = (
+                str(reasoning_result.raw)
+                if hasattr(reasoning_result, "raw")
+                else str(reasoning_result)
+            )
+            # Clean up reasoning
+            reasoning = reasoning.replace("*", "").strip()
 
         # Step 2: Planner Agent - creates the execution plan
         planner = Agent(

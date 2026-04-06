@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { cn } from '@/lib/utils';
 
 interface SelectedRangeInfo {
@@ -10,24 +10,37 @@ interface SelectedRangeInfo {
 }
 
 interface ChatInputProps {
-  onSend: (message: string) => void;
+  onSend: (message: string, enableReasoning?: boolean) => void;
   disabled?: boolean;
   selectedRange?: SelectedRangeInfo | null;
+  reasoningEnabled?: boolean;
+  onToggleReasoning?: (enabled: boolean) => void;
 }
 
-export const ChatInput: React.FC<ChatInputProps> = ({ onSend, disabled, selectedRange }) => {
+export const ChatInput: React.FC<ChatInputProps> = ({ 
+  onSend, 
+  disabled, 
+  selectedRange,
+  reasoningEnabled = true,
+  onToggleReasoning 
+}) => {
   const [input, setInput] = useState('');
+  const [reasoning, setReasoning] = useState(reasoningEnabled);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    setReasoning(reasoningEnabled);
+  }, [reasoningEnabled]);
 
   const handleSubmit = useCallback(() => {
     const trimmed = input.trim();
     if (!trimmed || disabled) return;
-    onSend(trimmed);
+    onSend(trimmed, reasoning);
     setInput('');
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
     }
-  }, [input, disabled, onSend]);
+  }, [input, disabled, onSend, reasoning]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -54,6 +67,12 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onSend, disabled, selected
       textareaRef.current.style.height = 'auto';
     }
   }, []);
+
+  const toggleReasoning = useCallback(() => {
+    const newValue = !reasoning;
+    setReasoning(newValue);
+    onToggleReasoning?.(newValue);
+  }, [reasoning, onToggleReasoning]);
 
   const rangePreview = selectedRange
     ? `${selectedRange.address} (${selectedRange.sheetName} · ${selectedRange.rowCount}×${selectedRange.columnCount})`
@@ -87,6 +106,25 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onSend, disabled, selected
             disabled={disabled}
           />
         </div>
+        
+        {/* Reasoning Toggle */}
+        <button
+          onClick={toggleReasoning}
+          title={reasoning ? 'Thinking enabled' : 'Thinking disabled'}
+          className={cn(
+            'p-1.5 rounded-md transition-all self-center',
+            reasoning 
+              ? 'text-[#217346] bg-[#217346]/10 hover:bg-[#217346]/20' 
+              : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
+          )}
+        >
+          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M12 2a10 10 0 1 0 10 10H12V2z" />
+            <path d="M12 2a10 10 0 0 1 10 10" />
+            <circle cx="12" cy="12" r="3" />
+          </svg>
+        </button>
+        
         {input && !disabled && (
           <button
             onClick={handleCancel}
