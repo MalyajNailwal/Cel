@@ -506,6 +506,10 @@ export default function App() {
               params.data_range = 'A1:B10';
               validationErrors.push(`Step ${i + 1}: Missing data_range — using "A1:B10"`);
             }
+            if (!params.sheet_name && lastCreatedSheet) {
+              params.sheet_name = lastCreatedSheet;
+              validationErrors.push(`Step ${i + 1}: Using newly created sheet "${lastCreatedSheet}" for chart`);
+            }
             if (params.position) {
               const pos = params.position;
               if (typeof pos.left !== 'number' || pos.left < 0) pos.left = 300;
