@@ -86,7 +86,12 @@ def setup_provider(provider: str, model: str, api_key: str):
 
 SYSTEM_PROMPT = """You are an expert Excel analyst. You create detailed, executable plans for Excel operations.
 Each step must have a specific action, target range, and all parameters needed.
-Always use A1 notation for ranges. Always read before writing if you need context."""
+Always use A1 notation for ranges. Always read before writing if you need context.
+
+IMPORTANT - For creating tables with data (e.g., "create table with 100 people"):
+1. First, generate the data using set_values with realistic sample data
+2. Then create the table using create_table on that range
+NEVER just call create_table without first creating the data with set_values"""
 
 TASK_DESCRIPTION = """Create a JSON plan for this Excel request: {message}
 
@@ -96,6 +101,11 @@ TASK_DESCRIPTION = """Create a JSON plan for this Excel request: {message}
 Available actions: get_workbook_structure, get_selected_range, get_range, get_sheet_data,
 set_values, set_formulas, apply_format, insert_rows, delete_rows, insert_columns,
 delete_columns, add_worksheet, delete_worksheet, create_table, sort_range, auto_fill, create_chart
+
+IMPORTANT - For creating tables with sample data:
+- First use set_values to write the header row and data rows
+- Then use create_table to create an Excel table on that range
+- Example: For "100 people" generate realistic sample data in set_values first
 
 IMPORTANT - COLOR FORMATTING:
 - When user asks for "color", "grey", "red", "blue", "highlight", "background color", "font color" → use apply_format with fill_color or font_color
