@@ -271,26 +271,65 @@ export default function App() {
                   let chartsCreated = 0;
                   let chartDesc = '';
 
-                  if (isPieRequest) {
-                    const pieCol = headers.findIndex((h: string) => /BloodGroup|Gender|Status|Department|Region/i.test(h));
-                    if (pieCol >= 0 && pieCol < headers.length) {
-                      const colLetter = String.fromCharCode(65 + pieCol);
-                      const pieRange = `${colLetter}1:${colLetter}${selectedData.length}`;
-                      await ExcelAPI.createChart('pie', pieRange, sheetName, `${headers[pieCol]} Distribution`);
-                      chartsCreated++;
-                      chartDesc += `📊 Pie chart created for ${headers[pieCol]} on ${sheetName}\n`;
+                  const numericCols: number[] = [];
+                  const categoricalCols: number[] = [];
+                  
+                  for (let i = 0; i < headers.length; i++) {
+                    const h = headers[i].toLowerCase();
+                    if (/name|id|blood|gender|status|department|region|product|city|category|date/i.test(h)) {
+                      categoricalCols.push(i);
+                    } else if (/age|hemoglobin|rbc|wbc|platelets|salary|revenue|score|quantity|price|count|amount|total|bp|sugar|cholesterol|triglycerides|creatinine|urea|sgot|sgpt|tsh|vitamin|iron|ferritin/i.test(h)) {
+                      numericCols.push(i);
+                    } else {
+                      const sampleVal = selectedData[Math.min(2, selectedData.length - 1)]?.[i];
+                      if (sampleVal !== undefined && sampleVal !== null) {
+                        const isNum = !isNaN(Number(String(sampleVal).replace(/[^0-9.-]/g, '')));
+                        if (isNum) numericCols.push(i);
+                        else categoricalCols.push(i);
+                      }
                     }
                   }
 
-                  if (isBarRequest) {
-                    const barCol = headers.findIndex((h: string) => /Age|Hemoglobin|RBC|WBC|Platelets|Salary|Revenue|Score/i.test(h));
-                    if (barCol >= 0 && barCol < headers.length) {
-                      const colLetter = String.fromCharCode(65 + barCol);
-                      const barRange = `${colLetter}1:${colLetter}${selectedData.length}`;
-                      await ExcelAPI.createChart('column', barRange, sheetName, `${headers[barCol]} Distribution`);
+                  if (categoricalCols.length > 0 && numericCols.length > 0) {
+                    if (isPieRequest) {
+                      const catCol = categoricalCols[0];
+                      const numCol = numericCols[0];
+                      const catLetter = String.fromCharCode(65 + catCol);
+                      const numLetter = String.fromCharCode(65 + numCol);
+                      const firstLetter = catLetter < numLetter ? catLetter : numLetter;
+                      const lastLetter = catLetter > numLetter ? catLetter : numLetter;
+                      const pieRange = `${firstLetter}1:${lastLetter}${Math.min(selectedData.length, 100)}`;
+                      await ExcelAPI.createChart('pie', pieRange, sheetName, `${headers[catCol]} vs ${headers[numCol]}`);
                       chartsCreated++;
-                      chartDesc += `📊 Bar chart created for ${headers[barCol]} on ${sheetName}\n`;
+                      chartDesc += `📊 Pie chart: ${headers[catCol]} vs ${headers[numCol]}\n`;
                     }
+                    
+                    if (isBarRequest || !isPieRequest) {
+                      const numCol = numericCols[0];
+                      const catCol = categoricalCols.length > 0 ? categoricalCols[0] : 0;
+                      const catLetter = String.fromCharCode(65 + catCol);
+                      const numLetter = String.fromCharCode(65 + numCol);
+                      const firstLetter = catLetter < numLetter ? catLetter : numLetter;
+                      const lastLetter = catLetter > numLetter ? catLetter : numLetter;
+                      const barRange = `${firstLetter}1:${lastLetter}${Math.min(selectedData.length, 100)}`;
+                      await ExcelAPI.createChart('column', barRange, sheetName, `${headers[numCol]} Distribution`);
+                      chartsCreated++;
+                      chartDesc += `📊 Bar chart: ${headers[numCol]}\n`;
+                    }
+                  } else if (categoricalCols.length > 0 && numericCols.length === 0) {
+                    const catCol = categoricalCols[0];
+                    const colLetter = String.fromCharCode(65 + catCol);
+                    const catRange = `${colLetter}1:${colLetter}${Math.min(selectedData.length, 100)}`;
+                    await ExcelAPI.createChart('column', catRange, sheetName, `${headers[catCol]} Count`);
+                    chartsCreated++;
+                    chartDesc += `📊 Bar chart for ${headers[catCol]}\n`;
+                  } else if (numericCols.length > 0 && categoricalCols.length === 0) {
+                    const numCol = numericCols[0];
+                    const colLetter = String.fromCharCode(65 + numCol);
+                    const numRange = `${colLetter}1:${colLetter}${Math.min(selectedData.length, 100)}`;
+                    await ExcelAPI.createChart('line', numRange, sheetName, `${headers[numCol]} Trend`);
+                    chartsCreated++;
+                    chartDesc += `📊 Line chart for ${headers[numCol]}\n`;
                   }
 
                   if (chartsCreated === 0 && headers.length >= 2) {
