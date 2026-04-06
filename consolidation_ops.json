@@ -1,0 +1,15 @@
+[
+  {
+    "op": "update",
+    "id": "019d5f0c-8769-7da8-ad21-bc8adb18a2cc",
+    "content": "Excel Add-in Sideload (macOS): Two methods — (1) Manual: copy manifest.xml to `~/Library/Containers/com.microsoft.Excel/Data/Documents/wef/` (create if missing), open Excel → Insert → My Add-ins → Browse → select manifest.xml. (2) CLI: `npx office-addin-debugging start manifest.xml desktop --app excel`. If add-in doesn't appear, fully quit Excel (Cmd+Q) and clear WebKit + Caches: `rm -rf ~/Library/Containers/com.microsoft.Excel/Data/Library/WebKit/ && rm -rf ~/Library/Containers/com.microsoft.Excel/Data/Library/Caches/WebKit/`, then reopen Excel. Note: CLI method has unreliable npm dependencies — fall back to manual wef sideloading if it fails."
+  },
+  {
+    "op": "delete",
+    "id": "019d5f41-ff33-775c-8c11-746be7e4ff8f"
+  },
+  {
+    "op": "delete",
+    "id": "019d5f10-d928-7b2e-b829-bbafa8ac3a4c"
+  }
+]

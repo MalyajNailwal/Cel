@@ -165,7 +165,18 @@ export async function getSheetData(sheetName: string, maxRows?: number): Promise
 
 export async function setValues(address: string, values: (string | number | boolean | null)[][], sheetName?: string): Promise<void> {
   await Excel.run(async (context) => {
+    const allSheets = context.workbook.worksheets;
+    allSheets.load('items/name');
+    await context.sync();
+    
+    const availableSheets = allSheets.items.map((s: any) => s.name);
+    
+    if (sheetName && !availableSheets.includes(sheetName)) {
+      throw new Error(`Sheet "${sheetName}" not found. Available: ${availableSheets.join(', ')}`);
+    }
+
     let targetSheet: Excel.Worksheet;
+    let targetAddress = address;
     
     if (sheetName) {
       targetSheet = context.workbook.worksheets.getItem(sheetName);
@@ -177,10 +188,10 @@ export async function setValues(address: string, values: (string | number | bool
     const colCount = values[0]?.length || 1;
     let range: Excel.Range;
     
-    if (address.includes(':')) {
-      range = targetSheet.getRange(address);
+    if (targetAddress.includes(':')) {
+      range = targetSheet.getRange(targetAddress);
     } else {
-      range = targetSheet.getRange(address).getResizedRange(rowCount - 1, colCount - 1);
+      range = targetSheet.getRange(targetAddress).getResizedRange(rowCount - 1, colCount - 1);
     }
     
     range.values = values;

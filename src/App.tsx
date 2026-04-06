@@ -560,7 +560,17 @@ export default function App() {
             }
 
             if (step.action === 'set_values' && lastCreatedSheet) {
-              await new Promise(r => setTimeout(r, 800));
+              await new Promise(r => setTimeout(r, 1000));
+              
+              const freshContext = await getWorkbookContext();
+              if (freshContext) {
+                const ctx = JSON.parse(freshContext);
+                const newSheet = ctx.sheets.find((s: string) => s.includes(lastCreatedSheet!.substring(0, 10)));
+                if (newSheet) {
+                  params.sheet_name = newSheet;
+                  validationErrors.push(`Step ${i + 1}: Using verified sheet "${newSheet}"`);
+                }
+              }
             }
             
             let retryCount = 0;
