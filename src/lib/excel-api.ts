@@ -446,19 +446,40 @@ export async function createChart(
       bar: Excel.ChartType.barClustered,
       barClustered: Excel.ChartType.barClustered,
       barStacked: Excel.ChartType.barStacked,
-      line: Excel.ChartType.line,
+      line: Excel.ChartType.lineMarkersStacked,
       lineStacked: Excel.ChartType.lineStacked,
+      lineMarkers: Excel.ChartType.lineMarkers,
+      lineMarkersStacked: Excel.ChartType.lineMarkersStacked,
       pie: Excel.ChartType.pie,
       pie3D: Excel.ChartType.pie,
       doughnut: Excel.ChartType.doughnut,
       area: Excel.ChartType.area,
       areaStacked: Excel.ChartType.areaStacked,
       scatter: Excel.ChartType.xyscatter,
+      xyScatter: Excel.ChartType.xyscatter,
+      xyScatterSmooth: Excel.ChartType.xyscatterSmooth,
+      xyScatterSmoothNoMarkers: Excel.ChartType.xyscatterSmoothNoMarkers,
+      xyScatterLines: Excel.ChartType.xyscatterLines,
+      xyScatterLinesNoMarkers: Excel.ChartType.xyscatterLinesNoMarkers,
       radar: Excel.ChartType.radar,
+      radarFilled: Excel.ChartType.radarFilled,
+      radarMarkers: Excel.ChartType.radarMarkers,
       surface: Excel.ChartType.surface,
       surface3D: Excel.ChartType.surface,
+      surfaceWireframe: Excel.ChartType.surfaceWireframe,
+      surface3DWireframe: Excel.ChartType.surfaceWireframe,
       bubble: Excel.ChartType.bubble,
-      stock: Excel.ChartType.stockHLC,
+      bubble3DEffect: Excel.ChartType.bubble3DEffect,
+      stockHLC: Excel.ChartType.stockHLC,
+      stockOHLC: Excel.ChartType.stockOHLC,
+      stockVHLC: Excel.ChartType.stockVHLC,
+      stockVOHLC: Excel.ChartType.stockVOHLC,
+      treemap: Excel.ChartType.treemap,
+      sunburst: Excel.ChartType.sunburst,
+      histogram: Excel.ChartType.histogram,
+      boxwhisker: Excel.ChartType.boxwhisker,
+      waterfall: Excel.ChartType.waterfall,
+      funnel: Excel.ChartType.funnel,
     };
 
     const excelChartType = chartTypeMap[chartType] || Excel.ChartType.columnClustered;
@@ -476,16 +497,26 @@ export async function createChart(
       chart.width = position.width;
       chart.height = position.height;
     } else {
-      chart.width = 500;
-      chart.height = 350;
-      chart.left = 300;
-      chart.top = 50;
+      chart.width = 550;
+      chart.height = 400;
+      chart.left = 400;
+      chart.top = 20;
     }
 
     chart.legend.visible = true;
     chart.legend.position = 'Bottom';
 
     await context.sync();
+
+    chart.load('name, series/items');
+    await context.sync();
+
+    if (chartType === 'line' && chart.series.items.length > 0) {
+      for (const series of chart.series.items) {
+        (series.format as any).line.weight = 2.5;
+      }
+      await context.sync();
+    }
 
     chart.load('name');
     await context.sync();

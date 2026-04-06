@@ -508,7 +508,14 @@ Provide clear, actionable insights. Focus on:
 1. Key findings from the numbers
 2. Any patterns or trends
 3. Important observations
-4. Recommendations if applicable"""
+4. Recommendations if applicable
+
+IMPORTANT - At the end, always suggest 2-3 chart types that would best visualize this data:
+
+💡 **Chart Suggestions:**
+- 🥧 Pie Chart: Best for [column_name] - shows distribution/proportions
+- 📊 Bar Chart: Best for [column_name] - compares values
+- 📈 Line Chart: Best for [column_name] - shows trends"""
 
         analyst = Agent(
             role="Large Data Analyst",

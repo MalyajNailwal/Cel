@@ -226,11 +226,12 @@ export default function App() {
 
         // Check if user wants data analysis
         const analysisKeywords = /analyze|analysis|statistics|stats|trends|insights|outliers|distribution|compare/i;
-        const chartKeywords = /chart|graph|plot|visual|pie|bar/i;
+        const chartKeywords = /chart|graph|plot|visual|pie|bar|line|trend/i;
         const isAnalysisRequest = analysisKeywords.test(userMessage);
         const isChartRequest = chartKeywords.test(userMessage);
         const isPieRequest = /pie\s*chart/i.test(userMessage);
         const isBarRequest = /bar\s*(graph|chart)/i.test(userMessage);
+        const isLineRequest = /line\s*chart|trend/i.test(userMessage);
 
         if ((isAnalysisRequest || isChartRequest) && selectedRangeData) {
           setProcessingPhase('analyzing');
@@ -266,22 +267,31 @@ export default function App() {
                 try {
                   const sr = JSON.parse(selectedRangeData);
                   const headers = selectedData[0] || [];
+                  const rows = selectedData.slice(1);
                   const address = sr.address;
                   const sheetName = sr.sheetName;
                   let chartsCreated = 0;
                   let chartDesc = '';
 
+                  const addrParts = address.split('!');
+                  const rangePart = addrParts.length > 1 ? addrParts[1] : addrParts[0];
+                  const rangeCells = rangePart.split(':');
+                  const startCell = rangeCells[0];
+                  const startColMatch = startCell.match(/^([A-Z]+)/);
+                  const startColIdx = startColMatch ? startColMatch[1].charCodeAt(0) - 65 : 0;
+                  const maxRows = Math.min(selectedData.length, 100);
+                  const numCols = headers.length;
+
                   const numericCols: number[] = [];
                   const categoricalCols: number[] = [];
-                  
                   for (let i = 0; i < headers.length; i++) {
                     const h = headers[i].toLowerCase();
-                    if (/name|id|blood|gender|status|department|region|product|city|category|date/i.test(h)) {
+                    if (/name|id|blood|gender|status|department|region|product|city|category|activity|date/i.test(h)) {
                       categoricalCols.push(i);
-                    } else if (/age|hemoglobin|rbc|wbc|platelets|salary|revenue|score|quantity|price|count|amount|total|bp|sugar|cholesterol|triglycerides|creatinine|urea|sgot|sgpt|tsh|vitamin|iron|ferritin/i.test(h)) {
+                    } else if (/age|hemoglobin|rbc|wbc|platelets|salary|revenue|score|quantity|price|count|amount|total|bp|sugar|cholesterol|triglycerides|creatinine|urea|sgot|sgpt|tsh|vitamin|iron|ferritin|hours/i.test(h)) {
                       numericCols.push(i);
                     } else {
-                      const sampleVal = selectedData[Math.min(2, selectedData.length - 1)]?.[i];
+                      const sampleVal = rows[Math.min(2, rows.length - 1)]?.[i];
                       if (sampleVal !== undefined && sampleVal !== null) {
                         const isNum = !isNaN(Number(String(sampleVal).replace(/[^0-9.-]/g, '')));
                         if (isNum) numericCols.push(i);
@@ -290,50 +300,93 @@ export default function App() {
                     }
                   }
 
-                  if (categoricalCols.length > 0 && numericCols.length > 0) {
-                    if (isPieRequest) {
-                      const catCol = categoricalCols[0];
-                      const numCol = numericCols[0];
-                      const catLetter = String.fromCharCode(65 + catCol);
-                      const numLetter = String.fromCharCode(65 + numCol);
-                      const firstLetter = catLetter < numLetter ? catLetter : numLetter;
-                      const lastLetter = catLetter > numLetter ? catLetter : numLetter;
-                      const pieRange = `${firstLetter}1:${lastLetter}${Math.min(selectedData.length, 100)}`;
-                      await ExcelAPI.createChart('pie', pieRange, sheetName, `${headers[catCol]} vs ${headers[numCol]}`);
+                  const createChartForColumn = async (colIdx: number, chartType: string, title: string) => {
+                    const colLetter = String.fromCharCode(65 + startColIdx + colIdx);
+                    const chartRange = `${colLetter}1:${colLetter}${maxRows}`;
+                    try {
+                      await ExcelAPI.createChart(chartType, chartRange, sheetName, title);
                       chartsCreated++;
-                      chartDesc += `📊 Pie chart: ${headers[catCol]} vs ${headers[numCol]}\n`;
-                    }
-                    
-                    if (isBarRequest || !isPieRequest) {
-                      const numCol = numericCols[0];
-                      const catCol = categoricalCols.length > 0 ? categoricalCols[0] : 0;
-                      const catLetter = String.fromCharCode(65 + catCol);
-                      const numLetter = String.fromCharCode(65 + numCol);
-                      const firstLetter = catLetter < numLetter ? catLetter : numLetter;
-                      const lastLetter = catLetter > numLetter ? catLetter : numLetter;
-                      const barRange = `${firstLetter}1:${lastLetter}${Math.min(selectedData.length, 100)}`;
-                      await ExcelAPI.createChart('column', barRange, sheetName, `${headers[numCol]} Distribution`);
+                      chartDesc += `📊 ${chartType} chart: ${title}\n`;
+                    } catch (e) {
+                      const endColIdx = startColIdx + numCols - 1;
+                      const startLetter = String.fromCharCode(65 + startColIdx);
+                      const endLetter = String.fromCharCode(65 + endColIdx);
+                      const fullRange = `${startLetter}1:${endLetter}${maxRows}`;
+                      await ExcelAPI.createChart(chartType, fullRange, sheetName, title);
                       chartsCreated++;
-                      chartDesc += `📊 Bar chart: ${headers[numCol]}\n`;
+                      chartDesc += `📊 ${chartType} chart: ${title}\n`;
                     }
-                  } else if (categoricalCols.length > 0 && numericCols.length === 0) {
-                    const catCol = categoricalCols[0];
-                    const colLetter = String.fromCharCode(65 + catCol);
-                    const catRange = `${colLetter}1:${colLetter}${Math.min(selectedData.length, 100)}`;
-                    await ExcelAPI.createChart('column', catRange, sheetName, `${headers[catCol]} Count`);
+                  };
+
+                  const createChartWithTwoColumns = async (col1Idx: number, col2Idx: number, chartType: string, title: string) => {
+                    const minCol = startColIdx + Math.min(col1Idx, col2Idx);
+                    const maxCol = startColIdx + Math.max(col1Idx, col2Idx);
+                    const startLetter = String.fromCharCode(65 + minCol);
+                    const endLetter = String.fromCharCode(65 + maxCol);
+                    const chartRange = `${startLetter}1:${endLetter}${maxRows}`;
+                    await ExcelAPI.createChart(chartType, chartRange, sheetName, title);
                     chartsCreated++;
-                    chartDesc += `📊 Bar chart for ${headers[catCol]}\n`;
-                  } else if (numericCols.length > 0 && categoricalCols.length === 0) {
-                    const numCol = numericCols[0];
-                    const colLetter = String.fromCharCode(65 + numCol);
-                    const numRange = `${colLetter}1:${colLetter}${Math.min(selectedData.length, 100)}`;
-                    await ExcelAPI.createChart('line', numRange, sheetName, `${headers[numCol]} Trend`);
-                    chartsCreated++;
-                    chartDesc += `📊 Line chart for ${headers[numCol]}\n`;
+                    chartDesc += `📊 ${chartType} chart: ${title}\n`;
+                  };
+
+                  if (isPieRequest) {
+                    if (categoricalCols.length > 0 && numericCols.length > 0) {
+                      await createChartWithTwoColumns(categoricalCols[0], numericCols[0], 'pie', `${headers[categoricalCols[0]]} Distribution`);
+                    } else if (categoricalCols.length > 0 && numCols >= 2) {
+                      await createChartWithTwoColumns(categoricalCols[0], 0, 'pie', `${headers[categoricalCols[0]]} Count`);
+                    } else if (numCols >= 2) {
+                      await createChartWithTwoColumns(0, 1, 'pie', `${headers[0]} Distribution`);
+                    } else {
+                      await createChartForColumn(0, 'pie', `${headers[0]} Distribution`);
+                    }
                   }
 
-                  if (chartsCreated === 0 && headers.length >= 2) {
-                    await ExcelAPI.createChart('column', address, sheetName, 'Data Chart');
+                  if (isBarRequest) {
+                    if (numericCols.length > 0 && categoricalCols.length > 0) {
+                      await createChartWithTwoColumns(categoricalCols[0], numericCols[0], 'column', `${headers[numericCols[0]]} by ${headers[categoricalCols[0]]}`);
+                    } else if (numericCols.length > 0) {
+                      await createChartForColumn(numericCols[0], 'column', `${headers[numericCols[0]]} Distribution`);
+                    } else if (numCols >= 2) {
+                      await createChartWithTwoColumns(0, 1, 'column', `${headers[1]} Distribution`);
+                    } else {
+                      await createChartForColumn(0, 'column', `${headers[0]} Distribution`);
+                    }
+                  }
+
+                  if (isLineRequest) {
+                    if (numericCols.length > 0 && categoricalCols.length > 0) {
+                      await createChartWithTwoColumns(categoricalCols[0], numericCols[0], 'line', `${headers[numericCols[0]]} Trend`);
+                    } else if (numericCols.length > 0 && numCols >= 2) {
+                      await createChartWithTwoColumns(0, numericCols[0], 'line', `${headers[numericCols[0]]} Trend`);
+                    } else if (numericCols.length > 0) {
+                      await createChartForColumn(numericCols[0], 'line', `${headers[numericCols[0]]} Trend`);
+                    } else if (numCols >= 2) {
+                      await createChartWithTwoColumns(0, 1, 'line', `${headers[1]} Trend`);
+                    } else {
+                      await createChartForColumn(0, 'line', `${headers[0]} Trend`);
+                    }
+                  }
+
+                  if (!isPieRequest && !isBarRequest && !isLineRequest) {
+                    if (numericCols.length > 0 && categoricalCols.length > 0) {
+                      await createChartWithTwoColumns(categoricalCols[0], numericCols[0], 'column', `${headers[numericCols[0]]} by ${headers[categoricalCols[0]]}`);
+                    } else if (numericCols.length > 0) {
+                      await createChartForColumn(numericCols[0], 'line', `${headers[numericCols[0]]} Trend`);
+                    } else if (categoricalCols.length > 0) {
+                      await createChartForColumn(categoricalCols[0], 'column', `${headers[categoricalCols[0]]} Count`);
+                    } else if (numCols >= 2) {
+                      await createChartWithTwoColumns(0, 1, 'column', `${headers[1]} Distribution`);
+                    } else {
+                      await createChartForColumn(0, 'column', 'Data Chart');
+                    }
+                  }
+
+                  if (chartsCreated === 0) {
+                    const endColIdx = startColIdx + numCols - 1;
+                    const startLetter = String.fromCharCode(65 + startColIdx);
+                    const endLetter = String.fromCharCode(65 + endColIdx);
+                    const fullRange = `${startLetter}1:${endLetter}${maxRows}`;
+                    await ExcelAPI.createChart('column', fullRange, sheetName, 'Data Chart');
                     chartsCreated++;
                     chartDesc = `📊 Chart created on ${sheetName}`;
                   }
