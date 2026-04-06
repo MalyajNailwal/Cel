@@ -800,27 +800,48 @@ export default function App() {
               }
             }
             
+            if (step.action === 'create_table' && lastCreatedSheet && !params.sheet_name) {
+              params.sheet_name = lastCreatedSheet;
+              validationErrors.push(`Step ${i + 1}: Using sheet "${lastCreatedSheet}" for table`);
+            }
+            
             let retryCount = 0;
             let lastError = '';
+            let lastSuccess = false;
+            let successOutput = '';
             while (retryCount < 2) {
               try {
                 const result = await executeStep(fixedStep);
-                executionResults.push({ action: step.action, success: true, output: result });
+                successOutput = result;
+                lastSuccess = true;
                 break;
               } catch (error) {
                 lastError = error instanceof Error ? error.message : String(error);
                 
                 if (step.action === 'add_worksheet' && lastError.includes('already exists')) {
                   knownSheets.add(params.name);
-                  executionResults.push({ action: step.action, success: true, output: `Using existing sheet "${params.name}"` });
+                  successOutput = `Using existing sheet "${params.name}"`;
+                  lastSuccess = true;
                   break;
                 }
                 
                 if (retryCount === 1) {
-                  executionResults.push({ action: step.action, success: false, output: lastError });
+                  break;
                 }
                 retryCount++;
               }
+            }
+            
+            if (lastSuccess) {
+              executionResults.push({ action: step.action, success: true, output: successOutput });
+              if (step.action === 'add_worksheet') {
+                const actualName = successOutput.match(/"([^"]+)"/)?.[1] || params.name;
+                lastCreatedSheet = actualName;
+                knownSheets.add(actualName);
+                validationErrors.push(`Step ${i + 1}: Updated lastCreatedSheet to "${actualName}"`);
+              }
+            } else {
+              executionResults.push({ action: step.action, success: false, output: lastError });
             }
           } catch (error) {
             const errMsg = error instanceof Error ? error.message : String(error);
@@ -1020,7 +1041,9 @@ async function executeStep(step: { action: string; params: Record<string, any>; 
     case 'delete_rows': await ExcelAPI.deleteRows(params.address, params.count, params.sheet_name); return `Deleted ${params.count} rows at ${params.address}`;
     case 'insert_columns': await ExcelAPI.insertColumns(params.address, params.count, params.sheet_name); return `Inserted ${params.count} columns at ${params.address}`;
     case 'delete_columns': await ExcelAPI.deleteColumns(params.address, params.count, params.sheet_name); return `Deleted ${params.count} columns at ${params.address}`;
-    case 'add_worksheet': await ExcelAPI.addWorksheet(params.name); return `Added worksheet "${params.name}"`;
+    case 'add_worksheet': 
+      const actualSheetName = await ExcelAPI.addWorksheet(params.name); 
+      return `Added worksheet "${actualSheetName}"`;
     case 'delete_worksheet': await ExcelAPI.deleteWorksheet(params.sheet_name || params.name); return `Deleted worksheet "${params.sheet_name || params.name}"`;
     case 'create_table': await ExcelAPI.createTable(params.address, params.name, params.sheet_name); return `Created table "${params.name}" at ${params.address}`;
     case 'sort_range': await ExcelAPI.sortRange(params.address, params.column_index, params.ascending, params.sheet_name); return `Sorted ${params.address} by column ${params.column_index}`;

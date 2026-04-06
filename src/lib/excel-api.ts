@@ -346,7 +346,8 @@ export async function deleteColumns(address: string, count: number, sheetName?: 
   });
 }
 
-export async function addWorksheet(name: string): Promise<void> {
+export async function addWorksheet(name: string): Promise<string> {
+  let createdName = name;
   await Excel.run(async (context) => {
     const normalizedName = name.trim().slice(0, 31);
     
@@ -370,6 +371,7 @@ export async function addWorksheet(name: string): Promise<void> {
       const newSheet = context.workbook.worksheets.add(normalizedName);
       newSheet.load('name');
       await context.sync();
+      createdName = newSheet.name;
     } catch (addError: any) {
       if (addError.message && addError.message.includes('argument')) {
         throw new Error(`Cannot create sheet "${normalizedName}" - name may be invalid or already in use`);
@@ -377,6 +379,7 @@ export async function addWorksheet(name: string): Promise<void> {
       throw addError;
     }
   });
+  return createdName;
 }
 
 export async function deleteWorksheet(sheetName: string): Promise<void> {
