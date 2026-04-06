@@ -337,15 +337,22 @@ export default function App() {
                   let aiRecommendedCols: number[] = [];
                   if (analysisResult.analysis) {
                     const analysisText = analysisResult.analysis.toLowerCase();
-                    // Look for "X vs Y" or "X and Y" patterns
-                    const vsMatch = analysisText.match(/(["']?)([^"']+?)\1\s+(?:vs|and|&)\s+["']?([^"'\n.]+)["']?/i);
-                    if (vsMatch) {
-                      const col1 = vsMatch[2].trim().toLowerCase();
-                      const col2 = vsMatch[3].trim().toLowerCase();
-                      for (let i = 0; i < headers.length; i++) {
-                        const h = headers[i].toLowerCase();
-                        if (h === col1 || h.includes(col1) || col1.includes(h)) aiRecommendedCols.push(i);
-                        else if (h === col2 || h.includes(col2) || col2.includes(h)) aiRecommendedCols.push(i);
+                    // Look for "X vs Y" pattern with word boundaries
+                    const vsPatterns = [
+                      /(["']?)([\w\s]+?)\1\s+(?:vs|versus|and|&)\s+["']?([\w\s]+?)["']?\s+(?:would|make|good|chart|graph)/i,
+                      /(["']?)([\w\s]+?)\1\s+(?:vs|versus|and|&)\s+["']?([\w\s]+?)["']?$/im,
+                    ];
+                    for (const pattern of vsPatterns) {
+                      const match = analysisText.match(pattern);
+                      if (match) {
+                        const col1 = match[2].trim().toLowerCase();
+                        const col2 = match[3].trim().toLowerCase();
+                        for (let i = 0; i < headers.length; i++) {
+                          const h = headers[i].toLowerCase();
+                          if (h === col1 || h.includes(col1) || col1.includes(h)) aiRecommendedCols.push(i);
+                          else if (h === col2 || h.includes(col2) || col2.includes(h)) aiRecommendedCols.push(i);
+                        }
+                        if (aiRecommendedCols.length >= 2) break;
                       }
                     }
                     // Fallback: find columns mentioned in context
@@ -365,7 +372,10 @@ export default function App() {
                   let userMentionedCols: number[] = [];
                   for (let i = 0; i < headers.length; i++) {
                     const h = headers[i].toLowerCase();
-                    if (userMessage.toLowerCase().includes(h)) {
+                    const words = h.split(/\s+/);
+                    // Check if any word from header appears in user message
+                    const matchCount = words.filter((w: string) => userMessage.toLowerCase().includes(w)).length;
+                    if (matchCount > 0) {
                       userMentionedCols.push(i);
                     }
                   }
