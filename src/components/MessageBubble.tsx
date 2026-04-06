@@ -331,13 +331,22 @@ export const TypingIndicator: React.FC<{ phase?: string }> = ({ phase = 'thinkin
           <path d="M2 12l10 5 10-5" />
         </svg>
       </div>
-      <div className="px-3.5 py-2.5 rounded-xl rounded-tl-sm bg-white border border-gray-200/80 shadow-soft">
-        <p className="text-[11px] text-gray-400 font-medium mb-1">{phaseLabels[phase] || 'Processing...'}</p>
-        <div className="flex gap-1">
-          <div className="w-1.5 h-1.5 bg-gray-300 rounded-full animate-dot-pulse" style={{ animationDelay: '0ms' }} />
-          <div className="w-1.5 h-1.5 bg-gray-300 rounded-full animate-dot-pulse" style={{ animationDelay: '150ms' }} />
-          <div className="w-1.5 h-1.5 bg-gray-300 rounded-full animate-dot-pulse" style={{ animationDelay: '300ms' }} />
+      <div className="flex flex-col max-w-[85%] min-w-0">
+        <div className="px-3.5 py-2.5 rounded-xl rounded-tl-sm bg-white border border-gray-200/80 shadow-soft">
+          <p className="text-[11px] text-gray-400 font-medium mb-1">{phaseLabels[phase] || 'Processing...'}</p>
+          <div className="flex gap-1">
+            <div className="w-1.5 h-1.5 bg-gray-300 rounded-full animate-dot-pulse" style={{ animationDelay: '0ms' }} />
+            <div className="w-1.5 h-1.5 bg-gray-300 rounded-full animate-dot-pulse" style={{ animationDelay: '150ms' }} />
+            <div className="w-1.5 h-1.5 bg-gray-300 rounded-full animate-dot-pulse" style={{ animationDelay: '300ms' }} />
+          </div>
         </div>
+        {(phase === 'reasoning' || phase === 'planning') && (
+          <div className="mt-2 space-y-1.5 animate-pulse">
+            <div className="h-2 bg-gray-200 rounded-full w-3/4" />
+            <div className="h-2 bg-gray-200 rounded-full w-5/6" />
+            <div className="h-2 bg-gray-200 rounded-full w-2/3" />
+          </div>
+        )}
       </div>
     </div>
   );
