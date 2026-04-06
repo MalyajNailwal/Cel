@@ -315,7 +315,7 @@ export const WelcomeScreen: React.FC = () => {
       </div>
       <h2 className="text-2xl font-bold text-gray-900 mb-1">Welcome to Cel</h2>
       <p className="text-sm text-gray-500 text-center max-w-[300px] leading-relaxed">
-        Tell me what to do. I'll do it in your Excel file.
+        Tell me what to do. Consider it done.
       </p>
     </div>
   );
