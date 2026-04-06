@@ -305,23 +305,14 @@ export const TypingIndicator: React.FC<{ phase?: string }> = ({ phase = 'thinkin
 
 export const WelcomeScreen: React.FC = () => {
   return (
-    <div className="flex-1 flex flex-col items-center justify-center px-8 py-12 animate-fade-in">
-      <div className="relative mb-8">
-        <div className="absolute inset-0 bg-gradient-to-br from-[#217346] via-[#2d8a52] to-[#185C37] rounded-2xl blur-xl opacity-40 scale-125" />
-        <div className="relative px-10 py-4 bg-gradient-to-br from-[#217346] to-[#185C37] rounded-2xl shadow-2xl shadow-[#217346]/40">
-          <span className="text-5xl font-black text-white tracking-tight" style={{ fontFamily: 'system-ui, -apple-system, sans-serif', letterSpacing: '-0.02em' }}>
-            Cel
-          </span>
-        </div>
+    <div className="flex-1 flex flex-col items-center justify-center px-4 py-6 animate-fade-in">
+      <div className="w-14 h-14 rounded-xl bg-[#217346] flex items-center justify-center mb-4 shadow-md">
+        <span className="text-2xl font-bold text-white">C</span>
       </div>
-      <h2 className="text-2xl font-semibold text-gray-800 mb-2">Your Excel Assistant</h2>
-      <p className="text-base text-gray-500 text-center max-w-[320px] leading-relaxed">
-        Tell me what to do.<br/>Consider it done.
+      <h2 className="text-xl font-bold text-gray-900 mb-1">Cel</h2>
+      <p className="text-sm text-gray-500 text-center">
+        Tell me what to do. Consider it done.
       </p>
-      <div className="mt-8 flex items-center gap-2 text-xs text-gray-400">
-        <div className="w-2 h-2 rounded-full bg-[#217346] animate-pulse" />
-        <span>Ready when you are</span>
-      </div>
     </div>
   );
 };
