@@ -6,22 +6,97 @@ Cel transforms Excel into an intelligent assistant that understands plain Englis
 
 ---
 
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                                 USER                                         │
+│                    "Create pie chart of sales"                              │
+└──────────────────────────────────┬──────────────────────────────────────────┘
+                                   │
+                                   ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                            FRONTEND                                          │
+│  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌──────────────┐  │
+│  │  ChatInput │───▶│ ReasoningUI │───▶│  Executor   │───▶│  Office.js   │  │
+│  └─────────────┘    └─────────────┘    └─────────────┘    └──────────────┘  │
+│         │                                         │                          │
+│         │            ┌─────────────┐              │                          │
+│         └───────────▶│  TypingInd  │              │                          │
+│                      └─────────────┘              │                          │
+└──────────────────────────────────────────────────┼──────────────────────────┘
+                                                   │
+                    ┌──────────────────────────────┼──────────────────────┐
+                    │                              ▼                       │
+                    │                   ┌──────────────────┐               │
+                    │                   │  Backend (FastAPI)│               │
+                    │                   └────────┬─────────┘               │
+                    │                            │                        │
+                    ▼                            ▼                        │
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              BACKEND                                         │
+│                                                                              │
+│  ┌────────────────┐    ┌────────────────┐    ┌────────────────────────┐  │
+│  │  Reasoning     │───▶│   Planning      │───▶│      Executor          │  │
+│  │    Agent       │    │    Agent        │    │   (Frontend)           │  │
+│  │  (CrewAI)      │    │  (CrewAI)       │    │                        │  │
+│  └───────┬────────┘    └────────┬────────┘    └────────────────────────┘  │
+│          │                      │                                                │
+│          │          ┌───────────┴───────────┐                                 │
+│          │          │                       │                                 │
+│          ▼          ▼                       ▼                                 │
+│  ┌────────────────────┐    ┌────────────────────┐    ┌─────────────────┐  │
+│  │   Analysis         │    │   Chart             │    │    Data         │  │
+│  │   Agent            │    │   Generator         │    │    Generator    │  │
+│  │ (stats, trends)    │    │  (Office.js)       │    │ (sample data)  │  │
+│  └────────────────────┘    └────────────────────┘    └─────────────────┘  │
+│                                                                              │
+│  ┌───────────────────────────────────────────────────────────────────────┐  │
+│  │                        AI Providers                                   │  │
+│  │         OpenAI • Anthropic • Google • OpenRouter (custom)            │  │
+│  └───────────────────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Execution Flow
+
+```
+1. USER sends message
+        │
+        ▼
+2. REASONING AGENT analyzes request (if Think enabled)
+        │
+        ▼
+3. PLANNING AGENT generates execution plan
+        │
+        ▼
+4. BACKEND routes to appropriate handler:
+   • Analysis → stats/trends on data
+   • Charts   → smart chart generation
+   • Data     → sample data generation
+   • Default  → Excel operations
+        │
+        ▼
+5. FRONTEND EXECUTOR runs Office.js calls
+        │
+        ▼
+6. RESULT returned to user + validation
+```
+
+---
+
 ## Capabilities
 
-**Natural Language Commands**
-- "Create a pie chart of sales by region"
-- "Add a new sheet with 500 employee records"
-- "Bold the header row and freeze the top row"
-- "Calculate average for column C"
-
-**AI-Powered Analysis**
-- Statistical analysis on any dataset size
-- Trend detection & outlier identification
-- Smart chart recommendations
-
-**Multi-Provider AI**
-- OpenAI, Anthropic, Google, OpenRouter
-- Custom model support
+| Feature | Description |
+|---------|-------------|
+| **Natural Language** | "Create pie chart", "Add 500 rows", "Bold header" |
+| **Reasoning Agent** | Shows thinking before execution (toggle on/off) |
+| **Analysis** | Stats, trends, outliers on any data size (100K+ rows) |
+| **Smart Charts** | Auto-detects column types, recommends best chart |
+| **Multi-Provider** | OpenAI, Anthropic, Google, OpenRouter |
+| **Dynamic** | No hardcoded headers - analyzes actual data values |
 
 ---
 
@@ -31,7 +106,7 @@ Cel transforms Excel into an intelligent assistant that understands plain Englis
 ```bash
 npm run dev
 ```
-- Opens: `https://localhost:3000/src/taskpane.html`
+Opens: `https://localhost:3000/src/taskpane.html`
 
 ### Backend
 ```bash
@@ -77,9 +152,9 @@ Open Excel → Insert → My Add-ins → Browse → select `manifest.xml`
 ## Features
 
 - Natural language → Excel operations
-- Data analysis & statistics
+- Reasoning agent with toggle
+- Data analysis (any size)
 - Smart chart generation
 - Multi-sheet management
 - Cell formatting & formulas
-- Reasoning agent (toggle on/off)
 - Real-time execution tracking
