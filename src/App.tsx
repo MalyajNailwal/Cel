@@ -158,6 +158,63 @@ export default function App() {
         // Check if user is referring to selected area
         const userWantsSelected = /selected|these|this|here|highlighted|current|this range|these cells/i.test(userMessage);
 
+        // Check if user wants data generation
+        const dataGenMatch = userMessage.match(/create\s+(a\s+)?table.*?(?:with|for)\s+(\d+)\s+people/i);
+        const bloodReportMatch = /blood\s*report|blood\s*test|medical\s*report/i.test(userMessage);
+        const employeeMatch = /employee|staff|worker|team\s*member/i.test(userMessage);
+        const salesMatch = /sales|revenue|product|order/i.test(userMessage);
+        const studentMatch = /student|grade|class|exam|mark/i.test(userMessage);
+
+        if (dataGenMatch) {
+          const count = parseInt(dataGenMatch[2]);
+          let dataType = 'blood_report';
+          if (employeeMatch) dataType = 'employee';
+          else if (salesMatch) dataType = 'sales';
+          else if (studentMatch) dataType = 'student';
+          else if (bloodReportMatch) dataType = 'blood_report';
+
+          setProcessingPhase('analyzing');
+          const genResponse = await fetch('/api/generate-data', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ data_type: dataType, count: Math.min(count, 10000) }),
+          });
+
+          if (genResponse.ok) {
+            const genResult = await genResponse.json();
+            const values = genResult.data;
+            const rows = values.length;
+            const cols = values[0]?.length || 1;
+            const colLetter = cols <= 26 ? String.fromCharCode(64 + cols) : String.fromCharCode(64 + Math.floor((cols - 1) / 26)) + String.fromCharCode(64 + ((cols - 1) % 26) + 1);
+            const address = `A1:${colLetter}${rows}`;
+
+            try {
+              await ExcelAPI.setValues(address, values);
+              await ExcelAPI.createTable(address, `Table_${Date.now()}`);
+              
+              const aiMsg: ExtendedMessage = {
+                id: `msg-${Date.now()}`,
+                role: 'assistant',
+                content: `✅ Created table with ${count} ${dataType.replace('_', ' ')} records!\n\n📊 Data: ${address} (${rows} rows × ${cols} columns)\n📋 Columns: ${genResult.headers.join(', ')}`,
+              };
+              setMessages((prev) => [...prev, aiMsg]);
+              setIsProcessing(false);
+              setProcessingPhase('idle');
+              return;
+            } catch (err: any) {
+              const aiMsg: ExtendedMessage = {
+                id: `msg-${Date.now()}`,
+                role: 'assistant',
+                content: `Generated ${count} records but couldn't write to Excel: ${err.message}`,
+              };
+              setMessages((prev) => [...prev, aiMsg]);
+              setIsProcessing(false);
+              setProcessingPhase('idle');
+              return;
+            }
+          }
+        }
+
         // Check if user wants data analysis
         const analysisKeywords = /analyze|analysis|statistics|stats|trends|insights|outliers|distribution|compare/i;
         const chartKeywords = /chart|graph|plot|visual/i;

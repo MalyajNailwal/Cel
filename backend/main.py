@@ -8,7 +8,10 @@ import json
 import re
 import io
 import base64
+import random
+import string
 from collections import Counter
+from datetime import datetime, timedelta
 
 app = FastAPI()
 
@@ -549,6 +552,286 @@ class ChartRequest(BaseModel):
     title: str = "Chart"
     x_column: Optional[str] = None
     y_column: Optional[str] = None
+
+
+def generate_blood_report_data(count: int) -> dict:
+    """Generate realistic blood report data for given count."""
+    first_names = [
+        "Aarav",
+        "Vivaan",
+        "Aditya",
+        "Vihaan",
+        "Arjun",
+        "Sai",
+        "Reyansh",
+        "Ayaan",
+        "Krishna",
+        "Ishaan",
+        "Ananya",
+        "Diya",
+        "Sara",
+        "Aanya",
+        "Aadhya",
+        "Pari",
+        "Myra",
+        "Riya",
+        "Anika",
+        "Neha",
+        "Rahul",
+        "Vikram",
+        "Priya",
+        "Rohit",
+        "Kavita",
+        "Sanjay",
+        "Meera",
+        "Amit",
+        "Pooja",
+        "Rajesh",
+    ]
+    last_names = [
+        "Sharma",
+        "Patel",
+        "Kumar",
+        "Singh",
+        "Gupta",
+        "Verma",
+        "Joshi",
+        "Rao",
+        "Reddy",
+        "Nair",
+        "Iyer",
+        "Menon",
+        "Chopra",
+        "Malhotra",
+        "Kapoor",
+        "Saxena",
+        "Agarwal",
+        "Bhatia",
+        "Mehta",
+        "Pandey",
+    ]
+    blood_groups = ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"]
+    blood_weights = [0.2, 0.06, 0.15, 0.05, 0.03, 0.01, 0.35, 0.05]
+
+    data = [["Name", "Age", "Gender", "BloodGroup", "Hemoglobin", "RBC"]]
+
+    for _ in range(count):
+        name = f"{random.choice(first_names)} {random.choice(last_names)}"
+        age = random.randint(18, 75)
+        gender = random.choice(["Male", "Female"])
+        blood_group = random.choices(blood_groups, weights=blood_weights, k=1)[0]
+
+        if gender == "Male":
+            hemoglobin = round(random.uniform(13.5, 17.5), 1)
+            rbc = round(random.uniform(4.7, 6.1), 2)
+        else:
+            hemoglobin = round(random.uniform(12.0, 15.5), 1)
+            rbc = round(random.uniform(4.2, 5.4), 2)
+
+        data.append([name, age, gender, blood_group, hemoglobin, rbc])
+
+    return {"headers": data[0], "data": data, "count": count}
+
+
+def generate_employee_data(count: int) -> dict:
+    """Generate realistic employee data."""
+    first_names = [
+        "Aarav",
+        "Vivaan",
+        "Aditya",
+        "Vihaan",
+        "Arjun",
+        "Sai",
+        "Reyansh",
+        "Ayaan",
+        "Krishna",
+        "Ishaan",
+        "Ananya",
+        "Diya",
+        "Sara",
+        "Aanya",
+        "Aadhya",
+        "Pari",
+        "Myra",
+        "Riya",
+        "Anika",
+        "Neha",
+    ]
+    last_names = [
+        "Sharma",
+        "Patel",
+        "Kumar",
+        "Singh",
+        "Gupta",
+        "Verma",
+        "Joshi",
+        "Rao",
+        "Reddy",
+        "Nair",
+    ]
+    departments = [
+        "Engineering",
+        "Marketing",
+        "Sales",
+        "HR",
+        "Finance",
+        "Operations",
+        "IT",
+        "Support",
+    ]
+    roles = [
+        "Manager",
+        "Senior Developer",
+        "Junior Developer",
+        "Analyst",
+        "Lead",
+        "Director",
+        "Coordinator",
+        "Specialist",
+    ]
+
+    data = [["Name", "Age", "Gender", "Department", "Role", "Salary"]]
+
+    for _ in range(count):
+        name = f"{random.choice(first_names)} {random.choice(last_names)}"
+        age = random.randint(22, 60)
+        gender = random.choice(["Male", "Female"])
+        dept = random.choice(departments)
+        role = random.choice(roles)
+        salary = random.randint(30000, 150000)
+
+        data.append([name, age, gender, dept, role, salary])
+
+    return {"headers": data[0], "data": data, "count": count}
+
+
+def generate_sales_data(count: int) -> dict:
+    """Generate realistic sales data."""
+    products = [
+        "Laptop",
+        "Phone",
+        "Tablet",
+        "Monitor",
+        "Keyboard",
+        "Mouse",
+        "Headphones",
+        "Speaker",
+        "Camera",
+        "Printer",
+    ]
+    regions = ["North", "South", "East", "West", "Central"]
+    salespeople = [
+        "Rahul",
+        "Priya",
+        "Amit",
+        "Kavita",
+        "Sanjay",
+        "Meera",
+        "Rohit",
+        "Pooja",
+        "Vikram",
+        "Neha",
+    ]
+
+    data = [
+        ["Date", "Product", "Region", "Salesperson", "Quantity", "Price", "Revenue"]
+    ]
+
+    start_date = datetime(2024, 1, 1)
+    for _ in range(count):
+        date = (start_date + timedelta(days=random.randint(0, 365))).strftime(
+            "%Y-%m-%d"
+        )
+        product = random.choice(products)
+        region = random.choice(regions)
+        salesperson = random.choice(salespeople)
+        quantity = random.randint(1, 20)
+        price = random.randint(500, 150000)
+        revenue = quantity * price
+
+        data.append([date, product, region, salesperson, quantity, price, revenue])
+
+    return {"headers": data[0], "data": data, "count": count}
+
+
+def generate_student_data(count: int) -> dict:
+    """Generate realistic student data."""
+    first_names = [
+        "Aarav",
+        "Vivaan",
+        "Aditya",
+        "Vihaan",
+        "Arjun",
+        "Ananya",
+        "Diya",
+        "Sara",
+        "Aanya",
+        "Aadhya",
+    ]
+    last_names = [
+        "Sharma",
+        "Patel",
+        "Kumar",
+        "Singh",
+        "Gupta",
+        "Verma",
+        "Joshi",
+        "Rao",
+        "Reddy",
+        "Nair",
+    ]
+    subjects = ["Math", "Science", "English", "History", "Computer"]
+
+    data = [
+        [
+            "Name",
+            "Grade",
+            "Math",
+            "Science",
+            "English",
+            "History",
+            "Computer",
+            "Average",
+        ]
+    ]
+
+    for _ in range(count):
+        name = f"{random.choice(first_names)} {random.choice(last_names)}"
+        grade = random.randint(6, 12)
+        scores = [random.randint(40, 100) for _ in subjects]
+        avg = round(sum(scores) / len(scores), 1)
+
+        data.append([name, grade] + scores + [avg])
+
+    return {"headers": data[0], "data": data, "count": count}
+
+
+class GenerateDataRequest(BaseModel):
+    data_type: str = "blood_report"
+    count: int = 100
+
+
+@app.post("/api/generate-data")
+async def generate_data(req: GenerateDataRequest):
+    """Generate sample data for Excel."""
+    try:
+        if req.count > 10000:
+            return {"error": "Maximum 10000 rows allowed"}
+
+        generators = {
+            "blood_report": generate_blood_report_data,
+            "employee": generate_employee_data,
+            "sales": generate_sales_data,
+            "student": generate_student_data,
+        }
+
+        generator = generators.get(req.data_type, generate_blood_report_data)
+        result = generator(req.count)
+
+        return result
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/api/generate-chart")
