@@ -678,6 +678,37 @@ export default function App() {
                 validationErrors.push(`Step ${i + 1}: Address "${params.address}" doesn't match data size — corrected to "${correctAddress}"`);
               }
               params.address = correctAddress;
+            } else {
+              // User wants selected range - validate/adjust data to match range size
+              const selectedRows = selectedRange.rowCount;
+              const selectedCols = selectedRange.columnCount;
+              const dataRows = params.values.length;
+              const dataCols = params.values[0]?.length || 1;
+              
+              // If data dimensions don't match selected range, adjust data array
+              if (dataRows !== selectedRows || dataCols !== selectedCols) {
+                validationErrors.push(`Step ${i + 1}: Data size ${dataRows}×${dataCols} doesn't match selected range ${selectedRows}×${selectedCols} — adjusting...`);
+                
+                // Pad or trim to match selected range
+                const adjustedValues: (string | number | boolean | null)[][] = [];
+                for (let r = 0; r < selectedRows; r++) {
+                  const row: (string | number | boolean | null)[] = [];
+                  for (let c = 0; c < selectedCols; c++) {
+                    if (r < dataRows && c < dataCols) {
+                      row.push(params.values[r][c]);
+                    } else {
+                      row.push(null);
+                    }
+                  }
+                  adjustedValues.push(row);
+                }
+                params.values = adjustedValues;
+                validationErrors.push(`Step ${i + 1}: Data adjusted to ${selectedRows}×${selectedCols} for selected range`);
+              }
+              // Use selected range address and sheet
+              params.address = selectedRange.address;
+              params.sheet_name = selectedRange.sheetName;
+              validationErrors.push(`Step ${i + 1}: Using selected range "${selectedRange.address}" in "${selectedRange.sheetName}"`);
             }
             
             // Only use lastCreatedSheet if user did NOT want selected range
@@ -803,13 +834,21 @@ export default function App() {
               validationErrors.push(`Step ${i + 1}: Missing table name — auto-generated`);
             }
             params.name = params.name.replace(/[^a-zA-Z0-9_]/g, '_');
-            if (!params.address) {
-              params.address = 'A1';
-              validationErrors.push(`Step ${i + 1}: Missing address — using "A1"`);
-            }
-            if (!params.sheet_name && lastCreatedSheet) {
-              params.sheet_name = lastCreatedSheet;
-              validationErrors.push(`Step ${i + 1}: Using sheet "${lastCreatedSheet}" for table`);
+            
+            // Use selected range if user wants selected, otherwise use AI-provided address
+            if (userWantsSelected && selectedRange) {
+              params.address = selectedRange.address;
+              params.sheet_name = selectedRange.sheetName;
+              validationErrors.push(`Step ${i + 1}: Creating table in selected range "${selectedRange.address}"`);
+            } else {
+              if (!params.address) {
+                params.address = 'A1';
+                validationErrors.push(`Step ${i + 1}: Missing address — using "A1"`);
+              }
+              if (!params.sheet_name && lastCreatedSheet) {
+                params.sheet_name = lastCreatedSheet;
+                validationErrors.push(`Step ${i + 1}: Using sheet "${lastCreatedSheet}" for table`);
+              }
             }
           }
 
