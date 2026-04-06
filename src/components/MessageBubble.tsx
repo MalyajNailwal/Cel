@@ -308,24 +308,19 @@ export const WelcomeScreen: React.FC<{ onSuggestionClick: (text: string) => void
 }) => {
   const suggestions = [
     {
+      icon: '✨',
+      title: 'Ask anything',
+      text: 'any task',
+    },
+    {
       icon: '📊',
-      title: 'Summarize selection',
-      text: 'Summarize the data in my selected range',
+      title: 'Chart it',
+      text: 'create charts instantly',
     },
     {
-      icon: '📈',
-      title: 'Create a chart',
-      text: 'Create a pie chart from the selected data',
-    },
-    {
-      icon: '🎨',
-      title: 'Format data',
-      text: 'Format the header row bold with a light blue background',
-    },
-    {
-      icon: '📋',
-      title: 'Workbook overview',
-      text: 'Tell me about all the sheets and tables in this workbook',
+      icon: '🧮',
+      title: 'Formulas? No',
+      text: 'just tell me what to calc',
     },
   ];
 
@@ -340,7 +335,7 @@ export const WelcomeScreen: React.FC<{ onSuggestionClick: (text: string) => void
       </div>
       <h2 className="text-lg font-bold text-gray-900 mb-0.5">Cel</h2>
       <p className="text-xs text-gray-400 mb-6 text-center max-w-[220px]">
-        Agentic AI for Excel
+        Still typing =SUM(A1:A10)? just ask me ✨
       </p>
       <div className="grid grid-cols-1 gap-1.5 w-full max-w-[260px]">
         {suggestions.map((s) => (
