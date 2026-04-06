@@ -25,6 +25,7 @@ interface ExtendedMessage extends ChatMessage {
   planSteps?: { action: string; params: Record<string, any>; description: string }[];
   executionResults?: { action: string; success: boolean; output: string }[];
   chartImage?: string;
+  chartImages?: string[];
 }
 
 interface SelectedRangeInfo {
@@ -159,7 +160,8 @@ export default function App() {
         const userWantsSelected = /selected|these|this|here|highlighted|current|this range|these cells/i.test(userMessage);
 
         // Check if user wants data generation
-        const dataGenMatch = userMessage.match(/create\s+(a\s+)?table.*?(?:with|for)\s+(\d+)\s+people/i);
+        const dataGenMatch = userMessage.match(/create\s+(a\s+)?table.*?(?:with|for)\s+(\d+)\s+(people|records|employees|sales|students|rows)/i);
+        const newSheetMatch = /new\s+sheet|make\s+sheet|create\s+sheet|another\s+sheet/i.test(userMessage);
         const bloodReportMatch = /blood\s*report|blood\s*test|medical\s*report/i.test(userMessage);
         const employeeMatch = /employee|staff|worker|team\s*member/i.test(userMessage);
         const salesMatch = /sales|revenue|product|order/i.test(userMessage);
@@ -189,13 +191,20 @@ export default function App() {
             const address = `A1:${colLetter}${rows}`;
 
             try {
-              await ExcelAPI.setValues(address, values);
-              await ExcelAPI.createTable(address, `Table_${Date.now()}`);
+              let targetSheet = 'Sheet1';
+              if (newSheetMatch) {
+                const sheetName = `${dataType.charAt(0).toUpperCase() + dataType.slice(1)}_${Date.now().toString().slice(-6)}`;
+                await ExcelAPI.addWorksheet(sheetName);
+                targetSheet = sheetName;
+              }
+              
+              await ExcelAPI.setValues(address, values, targetSheet);
+              await ExcelAPI.createTable(address, `Table_${Date.now()}`, targetSheet);
               
               const aiMsg: ExtendedMessage = {
                 id: `msg-${Date.now()}`,
                 role: 'assistant',
-                content: `✅ Created table with ${count} ${dataType.replace('_', ' ')} records!\n\n📊 Data: ${address} (${rows} rows × ${cols} columns)\n📋 Columns: ${genResult.headers.join(', ')}`,
+                content: `✅ Created table with ${count} ${dataType.replace('_', ' ')} records on sheet "${targetSheet}"!\n\n📊 Data: ${address} (${rows} rows × ${cols} columns)\n📋 Columns: ${genResult.headers.join(', ')}`,
               };
               setMessages((prev) => [...prev, aiMsg]);
               setIsProcessing(false);
@@ -217,9 +226,12 @@ export default function App() {
 
         // Check if user wants data analysis
         const analysisKeywords = /analyze|analysis|statistics|stats|trends|insights|outliers|distribution|compare/i;
-        const chartKeywords = /chart|graph|plot|visual/i;
+        const chartKeywords = /chart|graph|plot|visual|pie|bar/i;
         const isAnalysisRequest = analysisKeywords.test(userMessage);
         const isChartRequest = chartKeywords.test(userMessage);
+        const isPieRequest = /pie\s*chart/i.test(userMessage);
+        const isBarRequest = /bar\s*(graph|chart)/i.test(userMessage);
+        const isMultiChartRequest = isPieRequest && isBarRequest;
 
         if ((isAnalysisRequest || isChartRequest) && selectedRangeData) {
           setProcessingPhase('analyzing');
@@ -250,37 +262,121 @@ export default function App() {
 
             if (analyzeResponse.ok) {
               const analysisResult = await analyzeResponse.json();
-              
+              let chartImages: string[] = [];
+              let chartDesc = '';
+
               if (isChartRequest && analysisResult.statistics) {
-                const chartResponse = await fetch('/api/generate-chart', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    data: selectedData,
-                    chart_type: userMessage.includes('bar') ? 'bar' : userMessage.includes('pie') ? 'pie' : 'line',
-                    title: userMessage,
-                  }),
-                });
+                const headers = selectedData[0] || [];
                 
-                if (chartResponse.ok) {
-                  const chartResult = await chartResponse.json();
-                  const aiMsg: ExtendedMessage = {
-                    id: `msg-${Date.now()}`,
-                    role: 'assistant',
-                    content: `${analysisResult.analysis}\n\n📊 Chart generated (sampled ${chartResult.sampled_points} points from ${chartResult.total_rows} rows):`,
-                    chartImage: chartResult.chart_image,
-                  };
-                  setMessages((prev) => [...prev, aiMsg]);
-                  setIsProcessing(false);
-                  setProcessingPhase('idle');
-                  return;
+                if (isMultiChartRequest) {
+                  // Generate multiple charts
+                  const pieCol = headers.find((h: string) => /BloodGroup|Gender|Status|Department|Region/i.test(h)) || headers[3] || headers[2];
+                  const barCol = headers.find((h: string) => /Age|Hemoglobin|RBC|WBC|Platelets|Salary|Revenue|Score/i.test(h)) || headers[5] || headers[4];
+                  
+                  const pieResponse = await fetch('/api/generate-chart', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      data: selectedData,
+                      chart_type: 'pie',
+                      title: `${pieCol} Distribution`,
+                      column_name: pieCol,
+                    }),
+                  });
+                  
+                  if (pieResponse.ok) {
+                    const pieResult = await pieResponse.json();
+                    if (pieResult.chart_image) {
+                      chartImages.push(pieResult.chart_image);
+                      chartDesc += `\n\n📊 Pie Chart: ${pieCol} Distribution`;
+                    }
+                  }
+                  
+                  const barResponse = await fetch('/api/generate-chart', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      data: selectedData,
+                      chart_type: 'bar',
+                      title: `${barCol} Distribution`,
+                      column_name: barCol,
+                    }),
+                  });
+                  
+                  if (barResponse.ok) {
+                    const barResult = await barResponse.json();
+                    if (barResult.chart_image) {
+                      chartImages.push(barResult.chart_image);
+                      chartDesc += `\n📊 Bar Chart: ${barCol} Distribution`;
+                    }
+                  }
+                } else if (isPieRequest) {
+                  const pieCol = headers.find((h: string) => /BloodGroup|Gender|Status|Department|Region/i.test(h)) || headers[3] || headers[2];
+                  const pieResponse = await fetch('/api/generate-chart', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      data: selectedData,
+                      chart_type: 'pie',
+                      title: `${pieCol} Distribution`,
+                      column_name: pieCol,
+                    }),
+                  });
+                  
+                  if (pieResponse.ok) {
+                    const pieResult = await pieResponse.json();
+                    if (pieResult.chart_image) {
+                      chartImages.push(pieResult.chart_image);
+                      chartDesc = `\n\n📊 Pie Chart: ${pieCol} Distribution`;
+                    }
+                  }
+                } else if (isBarRequest) {
+                  const barCol = headers.find((h: string) => /Age|Hemoglobin|RBC|WBC|Platelets|Salary|Revenue|Score/i.test(h)) || headers[5] || headers[4];
+                  const barResponse = await fetch('/api/generate-chart', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      data: selectedData,
+                      chart_type: 'bar',
+                      title: `${barCol} Distribution`,
+                      column_name: barCol,
+                    }),
+                  });
+                  
+                  if (barResponse.ok) {
+                    const barResult = await barResponse.json();
+                    if (barResult.chart_image) {
+                      chartImages.push(barResult.chart_image);
+                      chartDesc = `\n\n📊 Bar Chart: ${barCol} Distribution`;
+                    }
+                  }
+                } else {
+                  const chartResponse = await fetch('/api/generate-chart', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      data: selectedData,
+                      chart_type: 'line',
+                      title: userMessage,
+                    }),
+                  });
+                  
+                  if (chartResponse.ok) {
+                    const chartResult = await chartResponse.json();
+                    if (chartResult.chart_image) {
+                      chartImages.push(chartResult.chart_image);
+                      chartDesc = `\n\n📊 Chart generated (sampled ${chartResult.sampled_points} points from ${chartResult.total_rows} rows):`;
+                    }
+                  }
                 }
               }
               
               const aiMsg: ExtendedMessage = {
                 id: `msg-${Date.now()}`,
                 role: 'assistant',
-                content: analysisResult.analysis || 'Analysis complete.',
+                content: `${analysisResult.analysis || 'Analysis complete.'}${chartDesc}`,
+                chartImage: chartImages.length > 0 ? chartImages[0] : undefined,
+                chartImages: chartImages.length > 1 ? chartImages : undefined,
               };
               setMessages((prev) => [...prev, aiMsg]);
               setIsProcessing(false);
@@ -834,6 +930,7 @@ export default function App() {
                 planSteps={(msg as any).planSteps}
                 executionResults={(msg as any).executionResults}
                 chartImage={(msg as any).chartImage}
+                chartImages={(msg as any).chartImages}
               />
             ))}
             {isProcessing && <TypingIndicator phase={processingPhase} />}

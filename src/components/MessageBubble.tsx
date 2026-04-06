@@ -10,6 +10,7 @@ interface MessageBubbleProps {
   planSteps?: { action: string; params: Record<string, any>; description: string }[];
   executionResults?: { action: string; success: boolean; output: string }[];
   chartImage?: string;
+  chartImages?: string[];
 }
 
 export const MessageBubble: React.FC<MessageBubbleProps> = ({
@@ -19,6 +20,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   planSteps,
   executionResults,
   chartImage,
+  chartImages,
 }) => {
   const isUser = message.role === 'user';
 
@@ -62,7 +64,16 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
         >
           {message.content}
         </div>
-        {chartImage && (
+        {chartImages && chartImages.length > 1 && (
+          <div className="mt-2 space-y-3">
+            {chartImages.map((img, idx) => (
+              <div key={idx} className="p-2 bg-gray-50 rounded-lg border border-gray-200">
+                <img src={img} alt={`Chart ${idx + 1}`} className="max-w-full h-auto rounded" />
+              </div>
+            ))}
+          </div>
+        )}
+        {chartImage && (!chartImages || chartImages.length <= 1) && (
           <div className="mt-2 p-2 bg-gray-50 rounded-lg border border-gray-200">
             <img src={chartImage} alt="Chart" className="max-w-full h-auto rounded" />
           </div>

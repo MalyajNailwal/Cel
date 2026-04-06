@@ -552,283 +552,287 @@ class ChartRequest(BaseModel):
     title: str = "Chart"
     x_column: Optional[str] = None
     y_column: Optional[str] = None
+    column_name: Optional[str] = None
 
 
-def generate_blood_report_data(count: int) -> dict:
-    """Generate realistic blood report data for given count."""
-    first_names = [
-        "Aarav",
-        "Vivaan",
-        "Aditya",
-        "Vihaan",
-        "Arjun",
-        "Sai",
-        "Reyansh",
-        "Ayaan",
-        "Krishna",
-        "Ishaan",
-        "Ananya",
-        "Diya",
-        "Sara",
-        "Aanya",
-        "Aadhya",
-        "Pari",
-        "Myra",
-        "Riya",
-        "Anika",
-        "Neha",
-        "Rahul",
-        "Vikram",
-        "Priya",
-        "Rohit",
-        "Kavita",
-        "Sanjay",
-        "Meera",
-        "Amit",
-        "Pooja",
-        "Rajesh",
-    ]
-    last_names = [
-        "Sharma",
-        "Patel",
-        "Kumar",
-        "Singh",
-        "Gupta",
-        "Verma",
-        "Joshi",
-        "Rao",
-        "Reddy",
-        "Nair",
-        "Iyer",
-        "Menon",
-        "Chopra",
-        "Malhotra",
-        "Kapoor",
-        "Saxena",
-        "Agarwal",
-        "Bhatia",
-        "Mehta",
-        "Pandey",
-    ]
-    blood_groups = ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"]
-    blood_weights = [0.2, 0.06, 0.15, 0.05, 0.03, 0.01, 0.35, 0.05]
-
-    data = [["Name", "Age", "Gender", "BloodGroup", "Hemoglobin", "RBC"]]
-
-    for _ in range(count):
-        name = f"{random.choice(first_names)} {random.choice(last_names)}"
-        age = random.randint(18, 75)
-        gender = random.choice(["Male", "Female"])
-        blood_group = random.choices(blood_groups, weights=blood_weights, k=1)[0]
-
-        if gender == "Male":
-            hemoglobin = round(random.uniform(13.5, 17.5), 1)
-            rbc = round(random.uniform(4.7, 6.1), 2)
-        else:
-            hemoglobin = round(random.uniform(12.0, 15.5), 1)
-            rbc = round(random.uniform(4.2, 5.4), 2)
-
-        data.append([name, age, gender, blood_group, hemoglobin, rbc])
-
-    return {"headers": data[0], "data": data, "count": count}
-
-
-def generate_employee_data(count: int) -> dict:
-    """Generate realistic employee data."""
-    first_names = [
-        "Aarav",
-        "Vivaan",
-        "Aditya",
-        "Vihaan",
-        "Arjun",
-        "Sai",
-        "Reyansh",
-        "Ayaan",
-        "Krishna",
-        "Ishaan",
-        "Ananya",
-        "Diya",
-        "Sara",
-        "Aanya",
-        "Aadhya",
-        "Pari",
-        "Myra",
-        "Riya",
-        "Anika",
-        "Neha",
-    ]
-    last_names = [
-        "Sharma",
-        "Patel",
-        "Kumar",
-        "Singh",
-        "Gupta",
-        "Verma",
-        "Joshi",
-        "Rao",
-        "Reddy",
-        "Nair",
-    ]
-    departments = [
-        "Engineering",
-        "Marketing",
-        "Sales",
-        "HR",
-        "Finance",
-        "Operations",
-        "IT",
-        "Support",
-    ]
-    roles = [
-        "Manager",
-        "Senior Developer",
-        "Junior Developer",
-        "Analyst",
-        "Lead",
-        "Director",
-        "Coordinator",
-        "Specialist",
-    ]
-
-    data = [["Name", "Age", "Gender", "Department", "Role", "Salary"]]
-
-    for _ in range(count):
-        name = f"{random.choice(first_names)} {random.choice(last_names)}"
-        age = random.randint(22, 60)
-        gender = random.choice(["Male", "Female"])
-        dept = random.choice(departments)
-        role = random.choice(roles)
-        salary = random.randint(30000, 150000)
-
-        data.append([name, age, gender, dept, role, salary])
-
-    return {"headers": data[0], "data": data, "count": count}
-
-
-def generate_sales_data(count: int) -> dict:
-    """Generate realistic sales data."""
-    products = [
-        "Laptop",
-        "Phone",
-        "Tablet",
-        "Monitor",
-        "Keyboard",
-        "Mouse",
-        "Headphones",
-        "Speaker",
-        "Camera",
-        "Printer",
-    ]
-    regions = ["North", "South", "East", "West", "Central"]
-    salespeople = [
-        "Rahul",
-        "Priya",
-        "Amit",
-        "Kavita",
-        "Sanjay",
-        "Meera",
-        "Rohit",
-        "Pooja",
-        "Vikram",
-        "Neha",
-    ]
-
-    data = [
-        ["Date", "Product", "Region", "Salesperson", "Quantity", "Price", "Revenue"]
-    ]
-
-    start_date = datetime(2024, 1, 1)
-    for _ in range(count):
-        date = (start_date + timedelta(days=random.randint(0, 365))).strftime(
-            "%Y-%m-%d"
-        )
-        product = random.choice(products)
-        region = random.choice(regions)
-        salesperson = random.choice(salespeople)
-        quantity = random.randint(1, 20)
-        price = random.randint(500, 150000)
-        revenue = quantity * price
-
-        data.append([date, product, region, salesperson, quantity, price, revenue])
-
-    return {"headers": data[0], "data": data, "count": count}
-
-
-def generate_student_data(count: int) -> dict:
-    """Generate realistic student data."""
-    first_names = [
-        "Aarav",
-        "Vivaan",
-        "Aditya",
-        "Vihaan",
-        "Arjun",
-        "Ananya",
-        "Diya",
-        "Sara",
-        "Aanya",
-        "Aadhya",
-    ]
-    last_names = [
-        "Sharma",
-        "Patel",
-        "Kumar",
-        "Singh",
-        "Gupta",
-        "Verma",
-        "Joshi",
-        "Rao",
-        "Reddy",
-        "Nair",
-    ]
-    subjects = ["Math", "Science", "English", "History", "Computer"]
-
-    data = [
-        [
-            "Name",
-            "Grade",
-            "Math",
-            "Science",
-            "English",
-            "History",
-            "Computer",
-            "Average",
-        ]
-    ]
-
-    for _ in range(count):
-        name = f"{random.choice(first_names)} {random.choice(last_names)}"
-        grade = random.randint(6, 12)
-        scores = [random.randint(40, 100) for _ in subjects]
-        avg = round(sum(scores) / len(scores), 1)
-
-        data.append([name, grade] + scores + [avg])
-
-    return {"headers": data[0], "data": data, "count": count}
-
-
-class GenerateDataRequest(BaseModel):
-    data_type: str = "blood_report"
-    count: int = 100
-
-
-@app.post("/api/generate-data")
-async def generate_data(req: GenerateDataRequest):
-    """Generate sample data for Excel."""
+def generate_single_chart(
+    data: List[List[Any]],
+    chart_type: str,
+    title: str,
+    column_name: Optional[str] = None,
+) -> Optional[str]:
+    """Generate a single chart and return base64 image."""
     try:
-        if req.count > 10000:
-            return {"error": "Maximum 10000 rows allowed"}
+        import matplotlib
 
-        generators = {
-            "blood_report": generate_blood_report_data,
-            "employee": generate_employee_data,
-            "sales": generate_sales_data,
-            "student": generate_student_data,
-        }
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
 
-        generator = generators.get(req.data_type, generate_blood_report_data)
-        result = generator(req.count)
+        if not data or len(data) < 2:
+            return None
 
-        return result
+        headers = data[0]
+        rows = data[1:]
+
+        sample_size = min(1000, len(rows))
+        step = max(1, len(rows) // sample_size)
+        sampled_rows = rows[::step]
+
+        fig, ax = plt.subplots(figsize=(10, 6))
+
+        if chart_type == "pie" and column_name:
+            try:
+                col_idx = headers.index(column_name)
+                values = [
+                    row[col_idx]
+                    for row in sampled_rows
+                    if col_idx < len(row) and row[col_idx] is not None
+                ]
+
+                from collections import Counter
+
+                counts = Counter([str(v) for v in values])
+                labels = list(counts.keys())
+                sizes = list(counts.values())
+
+                colors = plt.cm.Set3.colors[: len(labels)]
+                ax.pie(
+                    sizes,
+                    labels=labels,
+                    colors=colors,
+                    autopct="%1.1f%%",
+                    startangle=90,
+                    textprops={"fontsize": 9},
+                )
+                ax.set_title(title, fontsize=14, fontweight="bold", pad=20)
+            except Exception as e:
+                print(f"Pie chart error: {e}")
+                return None
+
+        elif chart_type == "bar":
+            if column_name:
+                try:
+                    col_idx = headers.index(column_name)
+                    values = [
+                        row[col_idx]
+                        for row in sampled_rows
+                        if col_idx < len(row) and row[col_idx] is not None
+                    ]
+
+                    if all(
+                        isinstance(v, (int, float))
+                        or (
+                            isinstance(v, str)
+                            and v.replace(".", "").replace("-", "").isdigit()
+                        )
+                        for v in values
+                        if v is not None
+                    ):
+                        numeric_values = []
+                        for v in values:
+                            try:
+                                numeric_values.append(
+                                    float(
+                                        str(v)
+                                        .replace(",", "")
+                                        .replace("₹", "")
+                                        .replace("$", "")
+                                        .strip()
+                                    )
+                                )
+                            except:
+                                numeric_values.append(0)
+
+                        ax.bar(
+                            range(len(numeric_values)),
+                            numeric_values,
+                            color="#217346",
+                            alpha=0.8,
+                        )
+                        ax.set_title(title, fontsize=14, fontweight="bold")
+                        ax.set_xlabel("Index", fontsize=10)
+                        ax.set_ylabel(column_name, fontsize=10)
+                        ax.grid(True, alpha=0.3, axis="y")
+                    else:
+                        from collections import Counter
+
+                        counts = Counter([str(v) for v in values])
+                        labels = list(counts.keys())[:15]
+                        sizes = [counts[l] for l in labels]
+
+                        ax.bar(labels, sizes, color="#217346", alpha=0.8)
+                        ax.set_title(title, fontsize=14, fontweight="bold")
+                        ax.set_xlabel(column_name, fontsize=10)
+                        ax.set_ylabel("Count", fontsize=10)
+                        ax.tick_params(axis="x", rotation=45)
+                        ax.grid(True, alpha=0.3, axis="y")
+                except Exception as e:
+                    print(f"Bar chart error: {e}")
+                    return None
+            else:
+                if len(headers) >= 2:
+                    y_data = []
+                    for row in sampled_rows:
+                        if len(row) > 1:
+                            try:
+                                y_data.append(
+                                    float(
+                                        str(row[1])
+                                        .replace(",", "")
+                                        .replace("₹", "")
+                                        .replace("$", "")
+                                        .strip()
+                                    )
+                                )
+                            except:
+                                y_data.append(0)
+
+                    ax.bar(range(len(y_data)), y_data, color="#217346", alpha=0.8)
+                    ax.set_title(title, fontsize=14, fontweight="bold")
+                    ax.set_xlabel("Index", fontsize=10)
+                    ax.set_ylabel(
+                        headers[1] if len(headers) > 1 else "Value", fontsize=10
+                    )
+                    ax.grid(True, alpha=0.3, axis="y")
+        else:
+            if column_name:
+                try:
+                    col_idx = headers.index(column_name)
+                    values = [
+                        row[col_idx]
+                        for row in sampled_rows
+                        if col_idx < len(row) and row[col_idx] is not None
+                    ]
+                    numeric_values = []
+                    for v in values:
+                        try:
+                            numeric_values.append(
+                                float(
+                                    str(v)
+                                    .replace(",", "")
+                                    .replace("₹", "")
+                                    .replace("$", "")
+                                    .strip()
+                                )
+                            )
+                        except:
+                            numeric_values.append(0)
+
+                    ax.plot(numeric_values, color="#217346", linewidth=0.8, alpha=0.8)
+                    ax.set_title(title, fontsize=14, fontweight="bold")
+                    ax.set_xlabel("Index", fontsize=10)
+                    ax.set_ylabel(column_name, fontsize=10)
+                    ax.grid(True, alpha=0.3)
+                except:
+                    return None
+            else:
+                if len(headers) >= 2:
+                    y_data = []
+                    for row in sampled_rows:
+                        if len(row) > 1:
+                            try:
+                                y_data.append(
+                                    float(
+                                        str(row[1])
+                                        .replace(",", "")
+                                        .replace("₹", "")
+                                        .replace("$", "")
+                                        .strip()
+                                    )
+                                )
+                            except:
+                                y_data.append(0)
+
+                    ax.plot(y_data, color="#217346", linewidth=0.8, alpha=0.8)
+                    ax.set_title(title, fontsize=14, fontweight="bold")
+                    ax.grid(True, alpha=0.3)
+
+        plt.tight_layout()
+
+        buf = io.BytesIO()
+        plt.savefig(buf, format="png", dpi=100, bbox_inches="tight")
+        plt.close()
+
+        buf.seek(0)
+        img_base64 = base64.b64encode(buf.read()).decode()
+
+        return f"data:image/png;base64,{img_base64}"
+
+    except Exception as e:
+        print(f"Chart generation error: {e}")
+        return None
+
+
+@app.post("/api/generate-chart")
+async def generate_chart(req: ChartRequest):
+    """Generate chart from data - samples large data automatically."""
+    try:
+        chart_image = generate_single_chart(
+            req.data, req.chart_type, req.title, req.column_name
+        )
+
+        if chart_image:
+            return {
+                "chart_image": chart_image,
+                "sampled_points": min(1000, len(req.data) - 1),
+                "total_rows": len(req.data) - 1,
+                "chart_type": req.chart_type,
+            }
+        else:
+            return {"error": "Failed to generate chart"}
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/generate-charts")
+async def generate_charts(req: ChartRequest):
+    """Generate multiple charts from data."""
+    try:
+        charts = []
+
+        if req.chart_type == "pie" and req.column_name:
+            img = generate_single_chart(req.data, "pie", req.title, req.column_name)
+            if img:
+                charts.append(
+                    {
+                        "type": "pie",
+                        "title": req.title,
+                        "image": img,
+                        "column": req.column_name,
+                    }
+                )
+
+        elif req.chart_type == "bar":
+            if req.column_name:
+                img = generate_single_chart(req.data, "bar", req.title, req.column_name)
+                if img:
+                    charts.append(
+                        {
+                            "type": "bar",
+                            "title": req.title,
+                            "image": img,
+                            "column": req.column_name,
+                        }
+                    )
+            else:
+                headers = req.data[0] if len(req.data) > 0 else []
+                for col_idx in range(1, min(len(headers), 5)):
+                    col_name = headers[col_idx]
+                    img = generate_single_chart(
+                        req.data, "bar", f"{col_name} Distribution", col_name
+                    )
+                    if img:
+                        charts.append(
+                            {
+                                "type": "bar",
+                                "title": f"{col_name} Distribution",
+                                "image": img,
+                                "column": col_name,
+                            }
+                        )
+
+        return {"charts": charts, "total_rows": len(req.data) - 1}
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
