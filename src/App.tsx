@@ -1178,10 +1178,7 @@ async function executeStep(step: { action: string; params: Record<string, any>; 
       console.log('[EXECUTION] set_values called with:', { address: params.address, sheet_name: params.sheet_name, valuesRows: params.values?.length });
       await ExcelAPI.setValues(params.address, params.values, params.sheet_name); 
       return `Values written to ${params.address} in ${params.sheet_name}`;
-    case 'create_table': 
-      console.log('[EXECUTION] create_table called with:', { address: params.address, name: params.name, sheet_name: params.sheet_name });
-      await ExcelAPI.createTable(params.address, params.name, params.sheet_name); 
-      return `Created table "${params.name}" at ${params.address} in ${params.sheet_name}`;
+    case 'create_table': await ExcelAPI.createTable(params.address, params.name, params.sheet_name); return `Created table "${params.name}" at ${params.address}`;
     case 'set_formulas': await ExcelAPI.setFormulas(params.address, params.formulas, params.sheet_name); return `Formulas written to ${params.address}`;
     case 'apply_format': {
       const format = { address: params.address, sheetName: params.sheet_name, bold: params.bold, italic: params.italic, fontColor: params.font_color, fillColor: params.fill_color, fontSize: params.font_size, fontFamily: params.font_family, numberFormat: params.number_format, horizontalAlignment: params.horizontal_alignment, verticalAlignment: params.vertical_alignment, wrapText: params.wrap_text };
@@ -1196,7 +1193,6 @@ async function executeStep(step: { action: string; params: Record<string, any>; 
       const actualSheetName = await ExcelAPI.addWorksheet(params.name); 
       return `Added worksheet "${actualSheetName}"`;
     case 'delete_worksheet': await ExcelAPI.deleteWorksheet(params.sheet_name || params.name); return `Deleted worksheet "${params.sheet_name || params.name}"`;
-    case 'create_table': await ExcelAPI.createTable(params.address, params.name, params.sheet_name); return `Created table "${params.name}" at ${params.address}`;
     case 'sort_range': await ExcelAPI.sortRange(params.address, params.column_index, params.ascending, params.sheet_name); return `Sorted ${params.address} by column ${params.column_index}`;
     case 'auto_fill': await ExcelAPI.autoFill(params.source_address, params.target_address, params.sheet_name); return `Autofilled from ${params.source_address} to ${params.target_address}`;
     case 'create_chart': return await ExcelAPI.createChart(params.chart_type, params.data_range, params.sheet_name, params.title, params.position);
