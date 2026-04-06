@@ -293,7 +293,7 @@ export default function App() {
             if (analyzeResponse.ok) {
               const analysisResult = await analyzeResponse.json();
 
-              if (isChartRequest && selectedRangeData) {
+                  if (isChartRequest && selectedRangeData) {
                 try {
                   const sr = JSON.parse(selectedRangeData);
                   const headers = selectedData[0] || [];
@@ -314,13 +314,14 @@ export default function App() {
                   const endColIdx = endColMatch ? endColMatch[1].charCodeAt(0) - 65 : startColIdx;
                   const numCols = headers.length;
 
+                  // Smart column detection - check values to determine type
                   const numericCols: number[] = [];
                   const categoricalCols: number[] = [];
                   for (let i = 0; i < headers.length; i++) {
                     const h = headers[i].toLowerCase();
                     if (/name|id|blood|gender|status|department|region|product|city|category|activity|date|month/i.test(h)) {
                       categoricalCols.push(i);
-                    } else if (/age|hemoglobin|rbc|wbc|platelets|salary|revenue|score|quantity|price|count|amount|total|bp|sugar|cholesterol|triglycerides|creatinine|urea|sgot|sgpt|tsh|vitamin|iron|ferritin|hours|sales|units/i.test(h)) {
+                    } else if (/age|hemoglobin|rbc|wbc|platelets|salary|revenue|score|quantity|price|count|amount|total|bp|sugar|cholesterol|triglycerides|creatinine|urea|sgot|sgpt|tsh|vitamin|iron|ferritin|hours|sales|units|titles/i.test(h)) {
                       numericCols.push(i);
                     } else {
                       const sampleVal = rows[Math.min(2, rows.length - 1)]?.[i];
@@ -329,6 +330,27 @@ export default function App() {
                         if (isNum) numericCols.push(i);
                         else categoricalCols.push(i);
                       }
+                    }
+                  }
+
+                  // Extract AI-recommended columns from analysis response
+                  let aiRecommendedCols: number[] = [];
+                  if (analysisResult.analysis) {
+                    const analysisText = analysisResult.analysis.toLowerCase();
+                    for (let i = 0; i < headers.length; i++) {
+                      const h = headers[i].toLowerCase();
+                      if (analysisText.includes(h) || analysisText.includes(h.replace(/\s+/g, ''))) {
+                        aiRecommendedCols.push(i);
+                      }
+                    }
+                  }
+
+                  // Check if user mentioned specific columns
+                  let userMentionedCols: number[] = [];
+                  for (let i = 0; i < headers.length; i++) {
+                    const h = headers[i].toLowerCase();
+                    if (userMessage.toLowerCase().includes(h)) {
+                      userMentionedCols.push(i);
                     }
                   }
 
@@ -354,7 +376,24 @@ export default function App() {
                     chartDesc += `📊 ${chartType} chart: ${title}\n`;
                   };
 
-                  if (isPieRequest) {
+                  // Priority: user mentioned > AI recommended > auto-detect
+                  const effectiveCols = userMentionedCols.length >= 2 ? userMentionedCols : 
+                                       aiRecommendedCols.length >= 2 ? aiRecommendedCols : [];
+
+                  if (effectiveCols.length >= 2) {
+                    // Use AI/user recommended columns
+                    const catCol = effectiveCols.find(c => categoricalCols.includes(c)) ?? effectiveCols[0];
+                    const numCol = effectiveCols.find(c => numericCols.includes(c)) ?? effectiveCols[1];
+                    if (isPieRequest) {
+                      await createChartWithTwoColumns(catCol, numCol, 'pie', `${headers[catCol]} vs ${headers[numCol]}`);
+                    } else if (isBarRequest) {
+                      await createChartWithTwoColumns(catCol, numCol, 'column', `${headers[numCol]} by ${headers[catCol]}`);
+                    } else if (isLineRequest) {
+                      await createChartWithTwoColumns(catCol, numCol, 'line', `${headers[numCol]} Trend`);
+                    } else {
+                      await createChartWithTwoColumns(catCol, numCol, 'column', `${headers[numCol]} by ${headers[catCol]}`);
+                    }
+                  } else if (isPieRequest) {
                     if (categoricalCols.length > 0 && numericCols.length > 0) {
                       await createChartWithTwoColumns(categoricalCols[0], numericCols[0], 'pie', `${headers[categoricalCols[0]]} Distribution`);
                     } else if (categoricalCols.length > 0 && numCols >= 2) {

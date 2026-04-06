@@ -1145,7 +1145,9 @@ Stats: {json.dumps(stats, indent=None)}
 
 Answer: {req.question}
 
-Keep it short, no asterisks (*)."""
+Keep it short, no asterisks (*).
+
+At the end, mention which 2 columns would make a good chart (e.g., "Team vs Total Titles")."""
 
         analyst = Agent(
             role="Data Analyst",
