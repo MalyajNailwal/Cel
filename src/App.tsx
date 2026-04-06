@@ -180,14 +180,16 @@ export default function App() {
         if (selectedRangeData) {
           try {
             const sr = JSON.parse(selectedRangeData);
+            console.log('[DEBUG] selectedRangeData parsed:', sr);
             if (sr.address && sr.sheetName) {
               selectedRange = { address: sr.address, sheetName: sr.sheetName, rowCount: sr.rowCount || 1, columnCount: sr.columnCount || 1 };
+              console.log('[DEBUG] selectedRange set:', selectedRange);
             }
-          } catch {}
+          } catch (e) { console.log('[DEBUG] selectedRangeData parse error:', e); }
         }
 
         // Check if user is referring to selected area
-        const userWantsSelected = /selected|these|this|here|highlighted|current|this range|these cells|put here|write here|add here|fill here/i.test(userMessage);
+        const userWantsSelected = /selected|these|this|here|highlighted|current|this range|these cells|put here|write here|add here|fill here|fill some|random data/i.test(userMessage);
 
         // Check if user wants data generation
         const dataGenMatch = userMessage.match(/create\s+(a\s+)?table.*?(?:with|for)\s+(\d+)\s+(people|records|employees|sales|students|rows)/i);
