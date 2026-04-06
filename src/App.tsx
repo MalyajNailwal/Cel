@@ -556,6 +556,10 @@ export default function App() {
           } catch {}
         }
 
+        // Add diagnostic info to execution results
+        const executionSummary = `[DEBUG] Selected range detected: ${selectedRange?.address || 'NONE'} in sheet ${selectedRange?.sheetName || 'NONE'}. User wants selected: ${userWantsSelected}`;
+        console.log(executionSummary);
+        
         for (let i = 0; i < validSteps.length; i++) {
           const step = validSteps[i];
           const params = { ...step.params };
