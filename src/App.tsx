@@ -296,12 +296,34 @@ export default function App() {
                   if (isChartRequest && selectedRangeData) {
                 try {
                   const sr = JSON.parse(selectedRangeData);
-                  const headers = selectedData[0] || [];
-                  const rows = selectedData.slice(1);
-                  const address = sr.address;
+                  let headers = selectedData[0] || [];
+                  let rows = selectedData.slice(1);
+                  let address = sr.address;
                   const sheetName = sr.sheetName;
                   let chartsCreated = 0;
                   let chartDesc = '';
+
+                  // Check if user mentioned columns that aren't in the selected range
+                  // If so, fetch full sheet data
+                  const userMsg = userMessage.toLowerCase();
+                  const allHeaders = headers.map((h: string) => h.toLowerCase());
+                  const mentionedHeaders = allHeaders.filter((h: string) => {
+                    const words = h.split(/\s+/);
+                    return words.some((w: string) => userMsg.includes(w));
+                  });
+                  
+                  // If user mentioned columns not in selection, fetch full sheet
+                  if (mentionedHeaders.length > 0 && headers.length < 5) {
+                    try {
+                      const fullData = await ExcelAPI.getSheetData(sheetName);
+                      if (fullData && fullData.values && fullData.values.length > 0) {
+                        headers = fullData.values[0] || [];
+                        rows = fullData.values.slice(1);
+                        const fullAddr = fullData.address;
+                        if (fullAddr) address = fullAddr;
+                      }
+                    } catch {}
+                  }
 
                   const addrParts = address.split('!');
                   const rangePart = addrParts.length > 1 ? addrParts[1] : addrParts[0];
