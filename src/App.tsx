@@ -190,6 +190,7 @@ export default function App() {
 
         // Check if user is referring to selected area
         const userWantsSelected = /selected|these|this|here|highlighted|current|this range|these cells|put here|write here|add here|fill here|fill some|random data/i.test(userMessage);
+        console.log('[DEBUG] userWantsSelected regex test for:', userMessage, '→ result:', userWantsSelected);
 
         // Check if user wants data generation
         const dataGenMatch = userMessage.match(/create\s+(a\s+)?table.*?(?:with|for)\s+(\d+)\s+(people|records|employees|sales|students|rows)/i);
@@ -1229,7 +1230,9 @@ async function getSelectedRangeData(): Promise<string | null> {
         const sheet = range.worksheet;
         sheet.load('name');
         await context.sync();
-        resolve(JSON.stringify({ address: range.address, sheetName: sheet.name, rowCount: range.rowCount, columnCount: range.columnCount, values: range.values }));
+        const result = JSON.stringify({ address: range.address, sheetName: sheet.name, rowCount: range.rowCount, columnCount: range.columnCount, values: range.values });
+        console.log('[RANGE] getSelectedRangeData returning:', result.slice(0, 200));
+        resolve(result);
       }).catch(() => resolve(null));
     });
   } catch { return null; }
