@@ -24,6 +24,7 @@ interface ExtendedMessage extends ChatMessage {
   id: string;
   planSteps?: { action: string; params: Record<string, any>; description: string }[];
   executionResults?: { action: string; success: boolean; output: string }[];
+  chartImage?: string;
 }
 
 interface SelectedRangeInfo {
@@ -159,9 +160,11 @@ export default function App() {
 
         // Check if user wants data analysis
         const analysisKeywords = /analyze|analysis|statistics|stats|trends|insights|outliers|distribution|compare/i;
+        const chartKeywords = /chart|graph|plot|visual/i;
         const isAnalysisRequest = analysisKeywords.test(userMessage);
+        const isChartRequest = chartKeywords.test(userMessage);
 
-        if (isAnalysisRequest && selectedRangeData) {
+        if ((isAnalysisRequest || isChartRequest) && selectedRangeData) {
           setProcessingPhase('analyzing');
           let selectedData = null;
           try {
@@ -172,7 +175,10 @@ export default function App() {
           } catch {}
 
           if (selectedData) {
-            const analyzeResponse = await fetch('/api/analyze', {
+            const isLargeData = selectedData.length > 1000;
+            const endpoint = isLargeData ? '/api/analyze-large' : '/api/analyze';
+            
+            const analyzeResponse = await fetch(endpoint, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
@@ -187,6 +193,33 @@ export default function App() {
 
             if (analyzeResponse.ok) {
               const analysisResult = await analyzeResponse.json();
+              
+              if (isChartRequest && analysisResult.statistics) {
+                const chartResponse = await fetch('/api/generate-chart', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    data: selectedData,
+                    chart_type: userMessage.includes('bar') ? 'bar' : userMessage.includes('pie') ? 'pie' : 'line',
+                    title: userMessage,
+                  }),
+                });
+                
+                if (chartResponse.ok) {
+                  const chartResult = await chartResponse.json();
+                  const aiMsg: ExtendedMessage = {
+                    id: `msg-${Date.now()}`,
+                    role: 'assistant',
+                    content: `${analysisResult.analysis}\n\n📊 Chart generated (sampled ${chartResult.sampled_points} points from ${chartResult.total_rows} rows):`,
+                    chartImage: chartResult.chart_image,
+                  };
+                  setMessages((prev) => [...prev, aiMsg]);
+                  setIsProcessing(false);
+                  setProcessingPhase('idle');
+                  return;
+                }
+              }
+              
               const aiMsg: ExtendedMessage = {
                 id: `msg-${Date.now()}`,
                 role: 'assistant',
@@ -728,6 +761,7 @@ export default function App() {
                 message={msg}
                 planSteps={(msg as any).planSteps}
                 executionResults={(msg as any).executionResults}
+                chartImage={(msg as any).chartImage}
               />
             ))}
             {isProcessing && <TypingIndicator phase={processingPhase} />}

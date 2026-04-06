@@ -4,3 +4,5 @@ crewai
 crewai-tools
 pydantic
 python-dotenv
+matplotlib
+numpy

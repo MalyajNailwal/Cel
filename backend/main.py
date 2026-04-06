@@ -1,10 +1,13 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import Optional, List, Any
 import os
 import json
 import re
+import io
+import base64
 from collections import Counter
 
 app = FastAPI()
@@ -337,6 +340,263 @@ def analyze_distribution(data: List[List[Any]]) -> dict:
         }
 
     return {"distribution": distribution}
+
+
+def compute_large_data_stats(data: List[List[Any]]) -> dict:
+    """Compute comprehensive statistics for large datasets efficiently."""
+    if not data or not data[0]:
+        return {"error": "No data to analyze"}
+
+    headers = data[0] if len(data) > 0 else []
+    rows = data[1:] if len(data) > 1 else []
+    total_rows = len(rows)
+
+    results = {
+        "overview": {
+            "total_rows": total_rows,
+            "total_columns": len(headers),
+            "headers": headers,
+        },
+        "columns": {},
+    }
+
+    for col_idx in range(len(headers)):
+        col_name = (
+            headers[col_idx] if col_idx < len(headers) else f"Column_{col_idx + 1}"
+        )
+        col_values = []
+
+        for row in rows:
+            if col_idx < len(row):
+                val = row[col_idx]
+                if val is not None and val != "":
+                    try:
+                        num = float(
+                            str(val)
+                            .replace(",", "")
+                            .replace("₹", "")
+                            .replace("$", "")
+                            .replace("€", "")
+                            .strip()
+                        )
+                        col_values.append(num)
+                    except (ValueError, TypeError):
+                        pass
+
+        if col_values:
+            sorted_vals = sorted(col_values)
+            n = len(sorted_vals)
+            mid = n // 2
+
+            results["columns"][col_name] = {
+                "count": len(col_values),
+                "sum": round(sum(col_values), 2),
+                "average": round(sum(col_values) / n, 2),
+                "min": round(min(col_values), 2),
+                "max": round(max(col_values), 2),
+                "range": round(max(col_values) - min(col_values), 2),
+                "median": round(
+                    sorted_vals[mid]
+                    if n % 2 == 1
+                    else (sorted_vals[mid - 1] + sorted_vals[mid]) / 2,
+                    2,
+                ),
+                "std_dev": round(
+                    (sum((x - sum(col_values) / n) ** 2 for x in col_values) / n)
+                    ** 0.5,
+                    2,
+                )
+                if n > 1
+                else 0,
+            }
+
+            if n >= 10:
+                q1 = sorted_vals[n // 4]
+                q3 = sorted_vals[3 * n // 4]
+                results["columns"][col_name]["q1"] = round(q1, 2)
+                results["columns"][col_name]["q3"] = round(q3, 2)
+                results["columns"][col_name]["iqr"] = round(q3 - q1, 2)
+
+    return results
+
+
+@app.post("/api/analyze-large")
+async def analyze_large_data(req: AnalyzeRequest):
+    """Analyze large datasets - handles 100k+ rows efficiently."""
+    try:
+        from crewai import Agent, Task, Crew, Process
+
+        setup_provider(req.provider, req.model, req.api_key)
+
+        stats = compute_large_data_stats(req.data)
+
+        ANALYSIS_TASK = f"""You are a Large Data Analyst. Analyze this dataset and answer: {req.question}
+
+Dataset Overview:
+- Total Rows: {stats.get("overview", {}).get("total_rows", "N/A")}
+- Total Columns: {stats.get("overview", {}).get("total_columns", "N/A")}
+- Headers: {stats.get("overview", {}).get("headers", [])}
+
+Column Statistics:
+{json.dumps(stats.get("columns", {}), indent=2)}
+
+Provide clear, actionable insights. Focus on:
+1. Key findings from the numbers
+2. Any patterns or trends
+3. Important observations
+4. Recommendations if applicable"""
+
+        analyst = Agent(
+            role="Large Data Analyst",
+            goal="Analyze large datasets efficiently and provide insights",
+            backstory="""You are an expert at analyzing large datasets. 
+            You compute statistics efficiently without trying to process every row through the LLM.
+            You focus on aggregated insights and patterns rather than individual data points.""",
+            verbose=False,
+            allow_delegation=False,
+            llm=req.model,
+        )
+
+        analysis_task = Task(
+            description=ANALYSIS_TASK,
+            expected_output="Clear insights from large dataset analysis.",
+            agent=analyst,
+        )
+
+        crew = Crew(
+            agents=[analyst],
+            tasks=[analysis_task],
+            process=Process.sequential,
+            verbose=False,
+        )
+
+        result = crew.kickoff()
+        output = str(result.raw) if hasattr(result, "raw") else str(result)
+
+        return {
+            "analysis": output,
+            "statistics": stats,
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class ChartRequest(BaseModel):
+    data: List[List[Any]]
+    chart_type: str = "line"
+    title: str = "Chart"
+    x_column: Optional[str] = None
+    y_column: Optional[str] = None
+
+
+@app.post("/api/generate-chart")
+async def generate_chart(req: ChartRequest):
+    """Generate chart from data - samples large data automatically."""
+    try:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        import numpy as np
+
+        if not req.data or len(req.data) < 2:
+            return {"error": "Not enough data"}
+
+        headers = req.data[0]
+        rows = req.data[1:]
+
+        sample_size = min(1000, len(rows))
+        step = max(1, len(rows) // sample_size)
+        sampled_rows = rows[::step]
+
+        x_data = None
+        y_data = None
+
+        if req.x_column and req.y_column:
+            try:
+                x_idx = headers.index(req.x_column) if req.x_column in headers else 0
+                y_idx = headers.index(req.y_column) if req.y_column in headers else 1
+
+                x_data = [
+                    row[x_idx]
+                    for row in sampled_rows
+                    if x_idx < len(row) and row[x_idx] is not None
+                ]
+                y_data = [
+                    row[y_idx]
+                    for row in sampled_rows
+                    if y_idx < len(row) and row[y_idx] is not None
+                ]
+            except:
+                pass
+
+        if not x_data or not y_data:
+            if len(headers) >= 2:
+                x_data = [
+                    row[0]
+                    for row in sampled_rows
+                    if len(row) > 0 and row[0] is not None
+                ]
+                y_data = [
+                    row[1]
+                    for row in sampled_rows
+                    if len(row) > 1 and row[1] is not None
+                ]
+            else:
+                x_data = list(range(len(sampled_rows)))
+                y_data = [
+                    row[0]
+                    for row in sampled_rows
+                    if len(row) > 0 and row[0] is not None
+                ]
+
+        numeric_y = []
+        for v in y_data:
+            try:
+                numeric_y.append(
+                    float(str(v).replace(",", "").replace("₹", "").replace("$", ""))
+                )
+            except:
+                numeric_y.append(0)
+
+        plt.figure(figsize=(12, 6))
+
+        if req.chart_type == "bar":
+            plt.bar(range(len(numeric_y)), numeric_y, color="#217346", alpha=0.8)
+        elif req.chart_type == "pie":
+            unique_vals = list(set(numeric_y[:20]))
+            counts = [numeric_y[:20].count(v) for v in unique_vals]
+            plt.pie(
+                counts, labels=[str(v)[:10] for v in unique_vals], autopct="%1.1f%%"
+            )
+        elif req.chart_type == "scatter":
+            plt.scatter(range(len(numeric_y)), numeric_y, alpha=0.5, color="#217346")
+        else:
+            plt.plot(numeric_y, color="#217346", linewidth=1, alpha=0.8)
+
+        plt.title(req.title, fontsize=14, fontweight="bold")
+        plt.xlabel("Index", fontsize=10)
+        plt.ylabel("Value", fontsize=10)
+        plt.grid(True, alpha=0.3)
+        plt.tight_layout()
+
+        buf = io.BytesIO()
+        plt.savefig(buf, format="png", dpi=100, bbox_inches="tight")
+        plt.close()
+
+        buf.seek(0)
+        img_base64 = base64.b64encode(buf.read()).decode()
+
+        return {
+            "chart_image": f"data:image/png;base64,{img_base64}",
+            "sampled_points": len(sampled_rows),
+            "total_rows": len(rows),
+            "chart_type": req.chart_type,
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/api/chat")
