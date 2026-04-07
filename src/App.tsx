@@ -198,7 +198,7 @@ export default function App() {
         const hasSelection = selectedRange && selectedRange.address;
         const createsNewSheet = /new sheet|another sheet|make sheet|create sheet/i.test(userMessage);
         const modifiesExisting = /add|write|put|fill|update|change|modify|calculate|compute|less|more|subtract|increase|decrease/i.test(userMessage);
-        const userWantsSelected = hasSelection && !createsNewSheet && (modifiesExisting || /selected|here|this range|these cells/i.test(userMessage));
+        const userWantsSelected = hasSelection && !createsNewSheet && (modifiesExisting || /selected|here|this range|these cells|border/i.test(userMessage));
         console.log('[DEBUG] userWantsSelected:', userWantsSelected, '| hasSelection:', hasSelection, '| createsNewSheet:', createsNewSheet);
         console.log('[DEBUG] userWantsSelected regex test for:', userMessage, '→ result:', userWantsSelected);
 
