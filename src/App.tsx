@@ -6,7 +6,7 @@ import { SettingsPanel } from '@/components/SettingsPanel';
 import type { ChatMessage, AIProvider } from '@/lib/ai-providers';
 import * as ExcelAPI from '@/lib/excel-api';
 
-type ProcessingPhase = 'idle' | 'thinking' | 'reasoning' | 'planning' | 'analyzing' | 'executing' | 'validating';
+type ProcessingPhase = 'idle' | 'thinking' | 'reasoning' | 'planning' | 'analyzing' | 'confirming' | 'executing' | 'validating';
 
 interface Settings {
   provider: AIProvider;
@@ -43,6 +43,7 @@ const PHASE_CONFIG: Record<ProcessingPhase, { label: string; color: string; acce
   reasoning: { label: 'Thinking...', color: 'text-indigo-600', accent: 'from-indigo-500 to-purple-600' },
   planning: { label: 'Planning...', color: 'text-blue-600', accent: 'from-blue-500 to-indigo-600' },
   analyzing: { label: 'Analyzing data...', color: 'text-cyan-600', accent: 'from-cyan-500 to-blue-600' },
+  confirming: { label: 'Confirm...', color: 'text-orange-600', accent: 'from-orange-500 to-red-600' },
   executing: { label: 'Working...', color: 'text-emerald-600', accent: 'from-emerald-500 to-teal-600' },
   validating: { label: 'Validating...', color: 'text-amber-600', accent: 'from-amber-500 to-orange-600' },
 };
@@ -583,6 +584,24 @@ export default function App() {
             setIsProcessing(false);
             setProcessingPhase('idle');
             return;
+          }
+        }
+
+        // Guardrails: Warn if writing to different address than selected
+        if (userWantsSelected && selectedRange) {
+          const writeStep = plan.find((s: any) => 
+            s.action === 'set_values' && s.params?.address
+          );
+          if (writeStep && writeStep.params.address !== selectedRange.address) {
+            setProcessingPhase('confirming');
+            const confirmAddress = window.confirm(
+              `You selected ${selectedRange.address} but the plan wants to write to ${writeStep.params.address}. ` +
+              `Use your selection (${selectedRange.address}) instead?`
+            );
+            if (!confirmAddress) {
+              setProcessingPhase('idle');
+              return;
+            }
           }
         }
 
