@@ -1186,6 +1186,97 @@ At the end, mention which 2 columns would make a good chart (e.g., "Team vs Tota
         raise HTTPException(status_code=500, detail=str(e))
 
 
+class ReflectRequest(BaseModel):
+    message: str
+    plan: list
+    results: list
+    provider: str = "openai"
+    model: str = "gpt-4o"
+    api_key: str
+
+
+REFLECTION_PROMPT = """You are a self-correction agent. Your job is to analyze failed execution steps and create a recovery plan.
+
+Original user request: {message}
+
+Planned steps:
+{plan}
+
+Results:
+{results}
+
+Rules:
+1. Only create recovery steps for actions that FAILED (success: false)
+2. If table creation failed with "overlap", suggest a different approach (e.g., just write data without table, or use a different range)
+3. If set_values failed, suggest fixing the data dimensions
+4. Keep recovery steps minimal - only fix what's broken
+5. Return ONLY valid JSON array of recovery steps
+
+Return format:
+[{{"action": "set_values", "params": {{"address": "A1", "values": [...], "sheet_name": "Sheet1"}}, "description": "Retry with corrected data"}}]
+
+If no recovery is possible, return: []"""
+
+
+@app.post("/api/reflect")
+async def reflect(req: ReflectRequest):
+    try:
+        failed_results = [r for r in req.results if not r.get("success")]
+        if not failed_results:
+            return {"recovery": []}
+
+        plan_str = "\n".join(
+            [
+                f"{i + 1}. {s.get('action', 'unknown')}: {s.get('description', '')}"
+                for i, s in enumerate(req.plan)
+            ]
+        )
+        results_str = "\n".join(
+            [
+                f"{i + 1}. {r.get('action', 'unknown')}: {'✓' if r.get('success') else '✗'} {r.get('output', '')}"
+                for i, r in enumerate(req.results)
+            ]
+        )
+
+        prompt = REFLECTION_PROMPT.format(
+            message=req.message,
+            plan=plan_str,
+            results=results_str,
+        )
+
+        from openai import OpenAI
+
+        client = OpenAI(api_key=req.api_key, base_url="https://api.openai.com/v1")
+
+        response = client.chat.completions.create(
+            model=req.model,
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are a self-correction agent. Return ONLY valid JSON.",
+                },
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.3,
+            max_tokens=1000,
+        )
+
+        output = response.choices[0].message.content or "[]"
+
+        # Try to extract JSON from response
+        json_match = re.search(r"\[.*\]", output, re.DOTALL)
+        if json_match:
+            recovery = json.loads(json_match.group())
+        else:
+            recovery = []
+
+        return {"recovery": recovery}
+
+    except Exception as e:
+        print(f"Reflection error: {e}")
+        return {"recovery": []}
+
+
 @app.get("/api/health")
 async def health():
     return {"status": "ok", "crewai": "connected"}

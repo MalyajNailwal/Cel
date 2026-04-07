@@ -1035,6 +1035,64 @@ export default function App() {
           }
         }
 
+        // Reflection: If any step failed, try to auto-recover
+        const failedSteps = executionResults.filter((r) => !r.success);
+        if (failedSteps.length > 0) {
+          setProcessingPhase('validating');
+          console.log('[REFLECTION] Reflection triggered -', failedSteps.length, 'step(s) failed, attempting recovery...');
+          
+          try {
+            const reflectionResponse = await fetch('/api/reflect', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                message: userMessage,
+                plan: validSteps,
+                results: executionResults,
+                provider: settings.provider,
+                model: settings.model,
+                api_key: apiKey,
+              }),
+            });
+            
+            if (reflectionResponse.ok) {
+              const reflectionData = await reflectionResponse.json();
+              const recoverySteps = reflectionData.recovery || [];
+              
+              if (recoverySteps.length > 0) {
+                console.log('[REFLECTION] Recovery plan received -', recoverySteps.length, 'step(s)');
+                validationErrors.push(`Reflection: Attempting ${recoverySteps.length} recovery step(s)...`);
+                
+                for (let j = 0; j < recoverySteps.length; j++) {
+                  const recoveryStep = recoverySteps[j];
+                  const recoveryParams = { ...recoveryStep.params };
+                  
+                  // Apply same selected range logic for recovery
+                  if (userWantsSelected && selectedRange) {
+                    const writeActions = ['set_values', 'set_formulas', 'apply_format', 'create_table'];
+                    if (writeActions.includes(recoveryStep.action)) {
+                      recoveryParams.address = selectedRange.address;
+                      recoveryParams.sheet_name = selectedRange.sheetName;
+                    }
+                  }
+                  
+                  try {
+                    const recoveryResult = await executeStep({ action: recoveryStep.action, params: recoveryParams, description: recoveryStep.description });
+                    executionResults.push({ action: recoveryStep.action, success: true, output: `Recovery: ${recoveryResult}` });
+                    validationErrors.push(`Recovery step ${j + 1}: ${recoveryStep.description} - SUCCESS`);
+                  } catch (error) {
+                    const errMsg = error instanceof Error ? error.message : String(error);
+                    executionResults.push({ action: recoveryStep.action, success: false, output: `Recovery failed: ${errMsg}` });
+                    validationErrors.push(`Recovery step ${j + 1}: ${recoveryStep.description} - FAILED`);
+                  }
+                }
+              }
+            }
+          } catch (e) {
+            console.log('[REFLECTION] Reflection failed:', e);
+          }
+        }
+        
         setProcessingPhase('validating');
         const validationResponse = await fetch('/api/execute', {
           method: 'POST',
