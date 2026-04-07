@@ -566,6 +566,24 @@ export default function App() {
           }
         }
 
+        // Guardrails: Warn on large write operations
+        const largeWriteStep = plan.find((s: any) => 
+          s.action === 'set_values' && s.params?.values?.length > 1000
+        );
+        if (largeWriteStep) {
+          const confirmLarge = window.confirm(`This will write ${largeWriteStep.params.values.length} rows. Continue?`);
+          if (!confirmLarge) {
+            setMessages((prev) => [...prev, {
+              id: `ai-${Date.now()}`,
+              role: 'assistant',
+              content: 'Operation cancelled. Large write prevented.',
+            }]);
+            setIsProcessing(false);
+            setProcessingPhase('idle');
+            return;
+          }
+        }
+
         setProcessingPhase('executing');
         const executionResults: { action: string; success: boolean; output: string }[] = [];
         let lastCreatedSheet: string | null = null;
