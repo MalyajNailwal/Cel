@@ -128,7 +128,8 @@ export default function App() {
 
         // Resource-aware: Use cheaper model for simple tasks, full model for complex
         const isComplexTask = /analyze|statistics|trends|outliers|distribution|compare|chart|graph|table.*\d{3,}/i.test(userMessage);
-        const effectiveModel = isComplexTask ? settings.model : (settings.model.includes('gpt-4') ? 'gpt-4o-mini' : settings.model);
+        const isGptModel = settings.model.includes('gpt');
+        const effectiveModel = isComplexTask ? settings.model : (isGptModel ? 'gpt-4o-mini' : settings.model);
 
         setProcessingPhase('planning');
         const planResponse = await fetch('/api/chat', {
@@ -1070,55 +1071,71 @@ export default function App() {
           setProcessingPhase('validating');
           console.log('[REFLECTION] Reflection triggered -', failedSteps.length, 'step(s) failed, attempting recovery...');
           
-          try {
-            const reflectionResponse = await fetch('/api/reflect', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                message: userMessage,
-                plan: validSteps,
-                results: executionResults,
-                provider: settings.provider,
-                model: settings.model,
-                api_key: apiKey,
-              }),
-            });
-            
-            if (reflectionResponse.ok) {
-              const reflectionData = await reflectionResponse.json();
-              const recoverySteps = reflectionData.recovery || [];
+          // Check if API key is available
+          if (!apiKey) {
+            console.log('[REFLECTION] No API key - skipping reflection');
+            validationErrors.push('Reflection skipped: No API key configured');
+          } else {
+            try {
+              const reflectionResponse = await fetch('/api/reflect', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  message: userMessage,
+                  plan: validSteps,
+                  results: executionResults,
+                  provider: settings.provider,
+                  model: settings.model,
+                  api_key: apiKey,
+                }),
+              });
               
-              if (recoverySteps.length > 0) {
-                console.log('[REFLECTION] Recovery plan received -', recoverySteps.length, 'step(s)');
-                validationErrors.push(`Reflection: Attempting ${recoverySteps.length} recovery step(s)...`);
+              if (reflectionResponse.ok) {
+                const reflectionData = await reflectionResponse.json();
+                const recoverySteps = reflectionData.recovery || [];
                 
-                for (let j = 0; j < recoverySteps.length; j++) {
-                  const recoveryStep = recoverySteps[j];
-                  const recoveryParams = { ...recoveryStep.params };
+                if (recoverySteps.length > 0) {
+                  console.log('[REFLECTION] Recovery plan received -', recoverySteps.length, 'step(s)');
+                  validationErrors.push(`Reflection: Attempting ${recoverySteps.length} recovery step(s)...`);
                   
-                  // Apply same selected range logic for recovery
-                  if (userWantsSelected && selectedRange) {
-                    const writeActions = ['set_values', 'set_formulas', 'apply_format', 'create_table'];
-                    if (writeActions.includes(recoveryStep.action)) {
-                      recoveryParams.address = selectedRange.address;
-                      recoveryParams.sheet_name = selectedRange.sheetName;
+                  let recoveryFailures = 0;
+                  for (let j = 0; j < recoverySteps.length; j++) {
+                    const recoveryStep = recoverySteps[j];
+                    const recoveryParams = { ...recoveryStep.params };
+                    
+                    // Apply same selected range logic for recovery
+                    if (userWantsSelected && selectedRange) {
+                      const writeActions = ['set_values', 'set_formulas', 'apply_format', 'create_table'];
+                      if (writeActions.includes(recoveryStep.action)) {
+                        recoveryParams.address = selectedRange.address;
+                        recoveryParams.sheet_name = selectedRange.sheetName;
+                      }
+                    }
+                    
+                    try {
+                      const recoveryResult = await executeStep({ action: recoveryStep.action, params: recoveryParams, description: recoveryStep.description });
+                      executionResults.push({ action: recoveryStep.action, success: true, output: `Recovery: ${recoveryResult}` });
+                      validationErrors.push(`Recovery step ${j + 1}: ${recoveryStep.description} - SUCCESS`);
+                    } catch (error) {
+                      const errMsg = error instanceof Error ? error.message : String(error);
+                      executionResults.push({ action: recoveryStep.action, success: false, output: `Recovery failed: ${errMsg}` });
+                      validationErrors.push(`Recovery step ${j + 1}: ${recoveryStep.description} - FAILED`);
+                      recoveryFailures++;
+                      
+                      // Skip remaining recovery if 2+ failures
+                      if (recoveryFailures >= 2) {
+                        validationErrors.push('Reflection: Too many recovery failures, stopping');
+                        break;
+                      }
                     }
                   }
-                  
-                  try {
-                    const recoveryResult = await executeStep({ action: recoveryStep.action, params: recoveryParams, description: recoveryStep.description });
-                    executionResults.push({ action: recoveryStep.action, success: true, output: `Recovery: ${recoveryResult}` });
-                    validationErrors.push(`Recovery step ${j + 1}: ${recoveryStep.description} - SUCCESS`);
-                  } catch (error) {
-                    const errMsg = error instanceof Error ? error.message : String(error);
-                    executionResults.push({ action: recoveryStep.action, success: false, output: `Recovery failed: ${errMsg}` });
-                    validationErrors.push(`Recovery step ${j + 1}: ${recoveryStep.description} - FAILED`);
-                  }
                 }
+              } else {
+                console.log('[REFLECTION] Reflection API returned error:', reflectionResponse.status);
               }
+            } catch (e) {
+              console.log('[REFLECTION] Reflection failed:', e);
             }
-          } catch (e) {
-            console.log('[REFLECTION] Reflection failed:', e);
           }
         }
         
