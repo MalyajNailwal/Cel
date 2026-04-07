@@ -1435,7 +1435,8 @@ async function executeStep(step: { action: string; params: Record<string, any>; 
     case 'create_table': await ExcelAPI.createTable(params.address, params.name, params.sheet_name); return `Created table "${params.name}" at ${params.address}`;
     case 'set_formulas': await ExcelAPI.setFormulas(params.address, params.formulas, params.sheet_name); return `Formulas written to ${params.address}`;
     case 'apply_format': {
-      const format = { address: params.address, sheetName: params.sheet_name, bold: params.bold, italic: params.italic, fontColor: params.font_color, fillColor: params.fill_color, fontSize: params.font_size, fontFamily: params.font_family, numberFormat: params.number_format, horizontalAlignment: params.horizontal_alignment, verticalAlignment: params.vertical_alignment, wrapText: params.wrap_text, borders: params.border_all ? { color: params.border_color || '#000000', style: params.border_style || 'Continuous', weight: params.border_weight || 'Thin' } : undefined };
+      const format = { address: params.address, sheetName: params.sheet_name, bold: params.bold, italic: params.italic, fontColor: params.font_color, fillColor: params.fill_color, fontSize: params.font_size, fontFamily: params.font_family, numberFormat: params.number_format, horizontalAlignment: params.horizontal_alignment, verticalAlignment: params.vertical_alignment, wrapText: params.wrap_text, borders: params.border_all ? { all: true, color: params.border_color || '#000000', style: params.border_style || 'Continuous', weight: params.border_weight || 'Thin' } : undefined };
+      console.log('[EXECUTION] apply_format borders:', JSON.stringify(format.borders));
       await ExcelAPI.applyFormat(format);
       return `Formatting applied to ${params.address}`;
     }

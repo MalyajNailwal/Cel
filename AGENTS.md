@@ -12,7 +12,7 @@
 ### Gotcha
 
 <!-- lore:019d6795-50a8-7000-aa5d-40a5574c1f44 -->
-* **apply\_format execution missing border params**: apply\_format border params fail at TWO points: (1) AI planner doesn't generate border params (border\_all, border\_color, border\_style, border\_weight) even though backend prompt instructs it to — the AI calls apply\_format but omits these fields; (2) execution handler in App.tsx must also pass those params to ExcelAPI.applyFormat(). Fix: Add frontend validation fallback — if user message mentions 'border' but plan lacks border params, auto-inject border\_all=true, border\_color='#000000', border\_style='Continuous', border\_weight='Thin' before execution. Always check: backend prompt → AI plan generation → frontend validation → execution handler → ExcelAPI.applyFormat.
+* **apply\_format execution missing border params**: apply\_format fails at TWO points: (1) AI planner doesn't generate border params (border\_all, border\_color, border\_style, border\_weight) even when backend prompt instructs it to; (2) execution handler in App.tsx must also pass those params to ExcelAPI.applyFormat(). Fix: Frontend validation fallback - if user message mentions 'border' but plan lacks border params, auto-inject border\_all=true, border\_color='#000000', border\_style='Continuous', border\_weight='Thin'. Also add 'border' to userWantsSelected regex (line 200) so execution loop uses selected range for border operations instead of AI-generated address.
 
 ### Pattern
 
