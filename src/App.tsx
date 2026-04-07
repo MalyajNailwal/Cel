@@ -126,8 +126,7 @@ export default function App() {
         const workbookContext = await getWorkbookContext();
         const selectedRangeData = await getSelectedRangeData();
 
-        // Resource-aware: Use user's selected model as-is - works with ANY provider/model
-        // No hardcoding - whatever user chooses, it just works
+        // Resource-aware: Use user's model as-is - truly dynamic, works with ANY model
         const effectiveModel = settings.model;
 
         setProcessingPhase('planning');
