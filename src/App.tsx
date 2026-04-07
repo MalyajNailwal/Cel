@@ -179,7 +179,7 @@ export default function App() {
           setTimeout(scrollToBottom, 100);
         }
         
-        const { validSteps, validationErrors } = validatePlan(plan);
+        const { validSteps, validationErrors } = validatePlan(plan, userMessage);
 
         // Parse selected range data for context awareness
         let selectedRange: { address: string; sheetName: string; rowCount: number; columnCount: number } | null = null;
@@ -860,6 +860,13 @@ export default function App() {
               params.address = 'A1';
               validationErrors.push(`Step ${i + 1}: Missing address — using "A1"`);
             }
+            if (!params.border_all && /border/i.test(userMessage)) {
+              params.border_all = true;
+              params.border_color = '#000000';
+              params.border_style = 'Continuous';
+              params.border_weight = 'Thin';
+              validationErrors.push(`Step ${i + 1}: Auto-injected border params (user mentioned "border")`);
+            }
           }
 
           if (['insert_rows', 'delete_rows', 'insert_columns', 'delete_columns'].includes(step.action)) {
@@ -1466,7 +1473,7 @@ async function getSelectedRangeData(): Promise<string | null> {
   } catch { return null; }
 }
 
-function validatePlan(plan: { action: string; params: Record<string, any>; description: string }[]): { validSteps: { action: string; params: Record<string, any>; description: string }[]; validationErrors: string[] } {
+function validatePlan(plan: { action: string; params: Record<string, any>; description: string }[], userMessage: string = ''): { validSteps: { action: string; params: Record<string, any>; description: string }[]; validationErrors: string[] } {
   const validSteps: { action: string; params: Record<string, any>; description: string }[] = [];
   const validationErrors: string[] = [];
   const VALID_ACTIONS = new Set(['get_workbook_structure', 'get_selected_range', 'get_range', 'get_sheet_data', 'set_values', 'set_formulas', 'apply_format', 'insert_rows', 'delete_rows', 'insert_columns', 'delete_columns', 'add_worksheet', 'delete_worksheet', 'create_table', 'sort_range', 'auto_fill', 'create_chart']);
