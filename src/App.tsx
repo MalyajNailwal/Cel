@@ -126,6 +126,10 @@ export default function App() {
         const workbookContext = await getWorkbookContext();
         const selectedRangeData = await getSelectedRangeData();
 
+        // Resource-aware: Use cheaper model for simple tasks, full model for complex
+        const isComplexTask = /analyze|statistics|trends|outliers|distribution|compare|chart|graph|table.*\d{3,}/i.test(userMessage);
+        const effectiveModel = isComplexTask ? settings.model : (settings.model.includes('gpt-4') ? 'gpt-4o-mini' : settings.model);
+
         setProcessingPhase('planning');
         const planResponse = await fetch('/api/chat', {
           method: 'POST',
@@ -133,7 +137,7 @@ export default function App() {
           body: JSON.stringify({
             message: userMessage,
             provider: settings.provider,
-            model: settings.model,
+            model: effectiveModel,
             api_key: apiKey,
             workbook_context: workbookContext,
             selected_range: selectedRangeData,
@@ -543,11 +547,31 @@ export default function App() {
           }
         }
 
+        // Guardrails: Check for destructive operations
+        const hasDestructiveAction = plan.some((s: any) => 
+          ['delete_worksheet', 'delete_rows', 'delete_columns'].includes(s.action)
+        );
+        if (hasDestructiveAction) {
+          const confirmDelete = window.confirm('This will delete data. Are you sure you want to continue?');
+          if (!confirmDelete) {
+            setMessages((prev) => [...prev, {
+              id: `ai-${Date.now()}`,
+              role: 'assistant',
+              content: 'Operation cancelled. No changes were made.',
+            }]);
+            setIsProcessing(false);
+            setProcessingPhase('idle');
+            return;
+          }
+        }
+
         setProcessingPhase('executing');
         const executionResults: { action: string; success: boolean; output: string }[] = [];
         let lastCreatedSheet: string | null = null;
         let lastDeletedSheet: string | null = null;
         const knownSheets = new Set<string>();
+        let completedSteps = 0;
+        const totalSteps = validSteps.length;
 
         if (workbookContext) {
           try {
@@ -1015,6 +1039,11 @@ export default function App() {
             
             if (lastSuccess) {
               executionResults.push({ action: step.action, success: true, output: successOutput });
+              completedSteps++;
+              // Goal monitoring - track progress
+              if (totalSteps > 1) {
+                validationErrors.push(`Progress: ${completedSteps}/${totalSteps} steps completed`);
+              }
               if (step.action === 'add_worksheet') {
                 const actualName = successOutput.match(/"([^"]+)"/)?.[1] || params.name;
                 lastCreatedSheet = actualName;
