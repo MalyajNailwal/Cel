@@ -805,6 +805,22 @@ export default function App() {
           }
 
           if (step.action === 'apply_format') {
+            const hasBorderParams = params.border_all || params.border_color || params.border_style || params.border_weight;
+            if (!hasBorderParams && /border/i.test(userMessage)) {
+              const borderColorMatch = userMessage.match(/\b(red|blue|green|black|white|grey|gray|yellow|orange|purple|pink|brown|cyan|magenta|navy|teal|maroon|olive|gold|silver|copper|bronze)\b/i);
+              const colorToHex: Record<string, string> = {
+                red: '#FF0000', blue: '#0000FF', green: '#008000', black: '#000000', white: '#FFFFFF',
+                grey: '#808080', gray: '#808080', yellow: '#FFFF00', orange: '#FFA500', purple: '#800080',
+                pink: '#FFC0CB', brown: '#A52A2A', cyan: '#00FFFF', magenta: '#FF00FF', navy: '#000080',
+                teal: '#008080', maroon: '#800000', olive: '#808000', gold: '#FFD700', silver: '#C0C0C0',
+                copper: '#B87333', bronze: '#CD7F32'
+              };
+              params.border_all = true;
+              params.border_color = borderColorMatch ? (colorToHex[borderColorMatch[1].toLowerCase()] || '#000000') : '#000000';
+              params.border_style = 'Continuous';
+              params.border_weight = 'Thin';
+              validationErrors.push(`Step ${i + 1}: Auto-injected border with color ${params.border_color}`);
+            }
             const HEX_REGEX = /^#[0-9A-Fa-f]{6}$/;
             const COLOR_MAP: Record<string, string> = {
               grey: '#808080', gray: '#808080', lightgrey: '#D3D3D3', lightgray: '#D3D3D3',
@@ -859,13 +875,6 @@ export default function App() {
             if (!params.address) {
               params.address = 'A1';
               validationErrors.push(`Step ${i + 1}: Missing address — using "A1"`);
-            }
-            if (!params.border_all && /border/i.test(userMessage)) {
-              params.border_all = true;
-              params.border_color = '#000000';
-              params.border_style = 'Continuous';
-              params.border_weight = 'Thin';
-              validationErrors.push(`Step ${i + 1}: Auto-injected border params (user mentioned "border")`);
             }
           }
 
