@@ -126,20 +126,18 @@ export default function App() {
         const workbookContext = await getWorkbookContext();
         const selectedRangeData = await getSelectedRangeData();
 
-        // Resource-aware: Use cheaper model for simple tasks, full model for complex
+        // Resource-aware: Use user's selected model - works with ANY provider/model
+        // Only swap to cheaper version for known simple tasks
         const isComplexTask = /analyze|statistics|trends|outliers|distribution|compare|chart|graph|table.*\d{3,}/i.test(userMessage);
         
-        // Map provider to its cheapest model
-        const cheapModels: Record<string, string> = {
-          openai: 'gpt-4o-mini',
-          anthropic: 'claude-3-haiku-20240307',
-          google: 'gemini-1.5-flash',
-          openrouter: 'openrouter/auto', // Let OpenRouter pick cheapest
-        };
-        
-        const effectiveModel = isComplexTask 
-          ? settings.model 
-          : (cheapModels[settings.provider] || settings.model);
+        // Simple optimization: for known expensive models, use cheaper for simple tasks
+        let effectiveModel = settings.model;
+        if (!isComplexTask) {
+          if (settings.model.includes('gpt-4')) effectiveModel = 'gpt-4o-mini';
+          else if (settings.model.includes('claude-3-5') || settings.model.includes('claude-3-opus')) effectiveModel = 'claude-3-haiku-20240307';
+          else if (settings.model.includes('gemini-2') || settings.model.includes('gemini-1.5-pro')) effectiveModel = 'gemini-1.5-flash';
+          // For any other model (custom, openrouter, etc.) - use as-is
+        }
 
         setProcessingPhase('planning');
         const planResponse = await fetch('/api/chat', {
