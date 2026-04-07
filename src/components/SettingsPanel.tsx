@@ -1,8 +1,10 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { cn } from '@/lib/utils';
+import { loadMemory, saveMemory, getCheckpoints, clearCheckpoints, removeCheckpoint } from '@/lib/memory';
+import * as ExcelAPI from '@/lib/excel-api';
 
 type AIProvider = 'openai' | 'anthropic' | 'google' | 'openrouter';
-type SettingsTab = 'provider' | 'security' | 'about';
+type SettingsTab = 'provider' | 'security' | 'memory' | 'conventions' | 'about';
 
 interface Settings {
   provider: AIProvider;
@@ -161,6 +163,30 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onSave, 
           <path d="M12 2L2 7l10 5 10-5-10-5z" />
           <path d="M2 17l10 5 10-5" />
           <path d="M2 12l10 5 10-5" />
+        </svg>
+      ),
+    },
+    {
+      id: 'memory',
+      label: 'Memory',
+      icon: (
+        <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+          <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
+          <line x1="12" y1="22.08" x2="12" y2="12" />
+        </svg>
+      ),
+    },
+    {
+      id: 'conventions',
+      label: 'Conventions',
+      icon: (
+        <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+          <polyline points="14 2 14 8 20 8" />
+          <line x1="16" y1="13" x2="8" y2="13" />
+          <line x1="16" y1="17" x2="8" y2="17" />
+          <polyline points="10 9 9 9 8 9" />
         </svg>
       ),
     },
@@ -361,6 +387,50 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onSave, 
                   <p className="text-[10px] text-gray-400 mt-1">Default: https://openrouter.ai/api/v1/chat/completions</p>
                 </div>
               )}
+            </div>
+          )}
+
+          {activeTab === 'memory' && (
+            <div className="space-y-5">
+              {/* Rules Section */}
+              <div>
+                <h4 className="text-xs font-semibold text-gray-700 mb-2">Persistent Rules</h4>
+                <p className="text-[10px] text-gray-400 mb-2">Instructions the AI will always follow</p>
+                <RulesEditor />
+              </div>
+
+              {/* Checkpoints Section */}
+              <div>
+                <h4 className="text-xs font-semibold text-gray-700 mb-2">Recovery Checkpoints</h4>
+                <p className="text-[10px] text-gray-400 mb-2">Auto-saved before mutations - click to restore</p>
+                <CheckpointList />
+              </div>
+
+              {/* Operation History */}
+              <div>
+                <h4 className="text-xs font-semibold text-gray-700 mb-2">Common Operations</h4>
+                <OperationHistory />
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'conventions' && (
+            <div className="space-y-5">
+              <div className="p-3 rounded-xl bg-blue-50 border border-blue-100">
+                <div className="flex items-start gap-2">
+                  <svg className="w-4 h-4 text-blue-500 mt-0.5 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <circle cx="12" cy="12" r="10" />
+                    <path d="M12 16v-4" />
+                    <path d="M12 8h.01" />
+                  </svg>
+                  <div>
+                    <p className="text-[11px] text-blue-700 font-medium">Formatting Conventions</p>
+                    <p className="text-[10px] text-blue-600 mt-0.5">Set your preferred formatting. The AI will follow these automatically.</p>
+                  </div>
+                </div>
+              </div>
+
+              <ConventionsEditor />
             </div>
           )}
 
@@ -576,6 +646,269 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onSave, 
           </button>
         </div>
       </div>
+    </div>
+  );
+};
+
+// Rules Editor Component
+const RulesEditor: React.FC = () => {
+  const [rules, setRules] = useState<string[]>(() => loadMemory().rules);
+  const [newRule, setNewRule] = useState('');
+
+  const addRule = () => {
+    if (!newRule.trim()) return;
+    const updated = [...rules, newRule.trim()];
+    setRules(updated);
+    saveMemory({ rules: updated });
+    setNewRule('');
+  };
+
+  const removeRule = (index: number) => {
+    const updated = rules.filter((_, i) => i !== index);
+    setRules(updated);
+    saveMemory({ rules: updated });
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="flex gap-2">
+        <input
+          type="text"
+          value={newRule}
+          onChange={(e) => setNewRule(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && addRule()}
+          placeholder="e.g., Always use ₹ for currency"
+          className="flex-1 px-3 py-2 text-xs border border-gray-200 rounded-lg focus:outline-none focus:border-[#217346] focus:ring-1 focus:ring-[#217346]"
+        />
+        <button
+          onClick={addRule}
+          className="px-3 py-2 rounded-lg bg-[#217346] text-white text-xs font-medium hover:bg-[#185C37] transition-colors"
+        >
+          Add
+        </button>
+      </div>
+      {rules.length === 0 && (
+        <p className="text-[10px] text-gray-400 text-center py-2">No rules yet. Add instructions the AI should always follow.</p>
+      )}
+      <div className="space-y-1.5 max-h-32 overflow-y-auto">
+        {rules.map((rule, i) => (
+          <div key={i} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-50 border border-gray-100 group">
+            <span className="w-4 h-4 rounded-full bg-[#217346]/10 text-[#217346] text-[9px] font-bold flex items-center justify-center flex-shrink-0">{i + 1}</span>
+            <span className="text-[11px] text-gray-700 flex-1 truncate">{rule}</span>
+            <button
+              onClick={() => removeRule(i)}
+              className="opacity-0 group-hover:opacity-100 w-5 h-5 rounded-md hover:bg-red-100 text-gray-400 hover:text-red-500 transition-all flex items-center justify-center"
+            >
+              <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M18 6L6 18M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+// Checkpoint List Component
+const CheckpointList: React.FC = () => {
+  const [checkpoints, setCheckpoints] = useState(getCheckpoints());
+
+  const restore = async (cp: any) => {
+    if (typeof Excel === 'undefined') return;
+    try {
+      await ExcelAPI.setValues(cp.address, cp.values, cp.sheet);
+      setCheckpoints(getCheckpoints());
+    } catch (e) {
+      console.error('Failed to restore checkpoint:', e);
+    }
+  };
+
+  const remove = (id: string) => {
+    removeCheckpoint(id);
+    setCheckpoints(getCheckpoints());
+  };
+
+  const clearAll = () => {
+    clearCheckpoints();
+    setCheckpoints([]);
+  };
+
+  if (checkpoints.length === 0) {
+    return <p className="text-[10px] text-gray-400 text-center py-2">No checkpoints yet. They're created automatically before mutations.</p>;
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <span className="text-[10px] text-gray-400">{checkpoints.length} checkpoint{checkpoints.length !== 1 ? 's' : ''}</span>
+        <button onClick={clearAll} className="text-[10px] text-red-500 hover:text-red-600 font-medium">Clear all</button>
+      </div>
+      <div className="space-y-1.5 max-h-40 overflow-y-auto">
+        {checkpoints.slice(0, 20).map((cp) => (
+          <div key={cp.id} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-emerald-50 border border-emerald-100 group">
+            <div className="w-6 h-6 rounded-full bg-emerald-100 flex items-center justify-center flex-shrink-0">
+              <svg className="w-3 h-3 text-emerald-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <polyline points="1 4 1 10 7 10" />
+                <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
+              </svg>
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-[11px] text-gray-700 font-medium truncate">{cp.description}</p>
+              <p className="text-[9px] text-gray-400">{cp.sheet}!{cp.address} · {new Date(cp.timestamp).toLocaleTimeString()}</p>
+            </div>
+            <button
+              onClick={() => restore(cp)}
+              className="opacity-0 group-hover:opacity-100 px-2 py-1 rounded-md bg-emerald-200 text-emerald-700 text-[9px] font-medium hover:bg-emerald-300 transition-all"
+            >
+              Restore
+            </button>
+            <button
+              onClick={() => remove(cp.id)}
+              className="opacity-0 group-hover:opacity-100 w-5 h-5 rounded-md hover:bg-red-100 text-gray-400 hover:text-red-500 transition-all flex items-center justify-center"
+            >
+              <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M18 6L6 18M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+// Operation History Component
+const OperationHistory: React.FC = () => {
+  const memory = loadMemory();
+  const ops = memory.commonOps;
+
+  if (ops.length === 0) {
+    return <p className="text-[10px] text-gray-400 text-center py-2">No operations tracked yet.</p>;
+  }
+
+  return (
+    <div className="space-y-1.5">
+      {ops.slice(0, 10).map((op) => (
+        <div key={op.op} className="flex items-center justify-between px-3 py-1.5 rounded-lg bg-gray-50">
+          <span className="text-[11px] text-gray-700 font-mono">{op.op}</span>
+          <span className="text-[10px] text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full">{op.count}×</span>
+        </div>
+      ))}
+    </div>
+  );
+};
+
+// Conventions Editor Component
+const ConventionsEditor: React.FC = () => {
+  const memory = loadMemory();
+  const [conventions, setConventions] = useState(memory.conventions);
+
+  const update = (key: string, value: any) => {
+    const updated = { ...conventions, [key]: value };
+    setConventions(updated);
+    saveMemory({ conventions: updated });
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Currency */}
+      <div>
+        <label className="block text-xs font-semibold text-gray-700 mb-1.5">Currency Symbol</label>
+        <div className="flex gap-1.5 flex-wrap">
+          {['$', '€', '£', '₹', '¥', '₿'].map((sym) => (
+            <button
+              key={sym}
+              onClick={() => update('currency', conventions.currency === sym ? undefined : sym)}
+              className={cn(
+                'w-9 h-9 rounded-lg text-sm font-medium border-2 transition-all',
+                conventions.currency === sym
+                  ? 'border-[#217346] bg-[#217346]/10 text-[#217346]'
+                  : 'border-gray-200 text-gray-500 hover:border-gray-300'
+              )}
+            >
+              {sym}
+            </button>
+          ))}
+          <input
+            type="text"
+            value={conventions.currency || ''}
+            onChange={(e) => update('currency', e.target.value || undefined)}
+            placeholder="Custom"
+            className="w-20 px-2 py-1.5 text-xs border border-gray-200 rounded-lg focus:outline-none focus:border-[#217346]"
+          />
+        </div>
+      </div>
+
+      {/* Date Format */}
+      <div>
+        <label className="block text-xs font-semibold text-gray-700 mb-1.5">Date Format</label>
+        <select
+          value={conventions.dateFormat || ''}
+          onChange={(e) => update('dateFormat', e.target.value || undefined)}
+          className="w-full px-3 py-2 text-xs border border-gray-200 rounded-lg focus:outline-none focus:border-[#217346] bg-white"
+        >
+          <option value="">Default</option>
+          <option value="MM/DD/YYYY">MM/DD/YYYY</option>
+          <option value="DD/MM/YYYY">DD/MM/YYYY</option>
+          <option value="YYYY-MM-DD">YYYY-MM-DD</option>
+          <option value="DD-MMM-YY">DD-MMM-YY</option>
+        </select>
+      </div>
+
+      {/* Decimal Places */}
+      <div>
+        <label className="block text-xs font-semibold text-gray-700 mb-1.5">Decimal Places</label>
+        <div className="flex gap-1.5">
+          {[0, 1, 2, 3, 4].map((n) => (
+            <button
+              key={n}
+              onClick={() => update('decimalPlaces', conventions.decimalPlaces === n ? undefined : n)}
+              className={cn(
+                'flex-1 py-2 rounded-lg text-xs font-medium border-2 transition-all',
+                conventions.decimalPlaces === n
+                  ? 'border-[#217346] bg-[#217346]/10 text-[#217346]'
+                  : 'border-gray-200 text-gray-500 hover:border-gray-300'
+              )}
+            >
+              {n}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Negative Style */}
+      <div>
+        <label className="block text-xs font-semibold text-gray-700 mb-1.5">Negative Numbers</label>
+        <div className="grid grid-cols-3 gap-1.5">
+          {[
+            { value: '-123', label: '-123' },
+            { value: '(123)', label: '(123)' },
+            { value: '123-', label: '123-' },
+          ].map((style) => (
+            <button
+              key={style.value}
+              onClick={() => update('negativeStyle', conventions.negativeStyle === style.value ? undefined : style.value)}
+              className={cn(
+                'py-2 rounded-lg text-xs font-mono border-2 transition-all',
+                conventions.negativeStyle === style.value
+                  ? 'border-[#217346] bg-[#217346]/10 text-[#217346]'
+                  : 'border-gray-200 text-gray-500 hover:border-gray-300'
+              )}
+            >
+              {style.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Reset */}
+      <button
+        onClick={() => { setConventions({}); saveMemory({ conventions: {} }); }}
+        className="w-full py-2 rounded-lg border border-gray-200 text-xs text-gray-500 hover:bg-gray-50 transition-colors"
+      >
+        Reset to Defaults
+      </button>
     </div>
   );
 };
