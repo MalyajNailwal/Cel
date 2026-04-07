@@ -1,8 +1,8 @@
 # Cel
 
-**Your AI-Powered Excel Command Center**
+**Intelligent Spreadsheet Orchestration**
 
-Cel transforms how you work with spreadsheets. Just tell it what you need in plain English — it understands, plans, and executes.
+Cel redefines human-computer interaction with spreadsheets. Rather than navigating menus and formulas, you express intent — the system interprets, plans, and materializes outcomes directly within your workbook.
 
 ---
 
@@ -62,24 +62,24 @@ Cel transforms how you work with spreadsheets. Just tell it what you need in pla
 
 ## How It Works
 
-1. **You speak** — Type your request in natural language
-2. **Reasoning** — Agent breaks down what you need (toggle on/off)
-3. **Planning** — Generates step-by-step execution plan
-4. **Execution** — Runs operations via Office.js API
-5. **Result** — Returns outcome with validation
+1. **Intent Capture** — Express requirements in natural language
+2. **Cognitive Layer** — System decomposes and validates approach (toggleable)
+3. **Plan Synthesis** — Generates executable operation sequence
+4. **Materialization** — Operations applied via native spreadsheet APIs
+5. **Outcome Delivery** — Results presented with contextual validation
 
 ---
 
-## What It Does
+## Capabilities
 
-| Capability | Example |
-|------------|---------|
-| **Charts** | "Pie chart of sales by region" |
-| **Data** | "Add 500 employee records" |
-| **Formatting** | "Bold header, freeze top row" |
-| **Analysis** | "Find trends in this data" |
-| **Formulas** | "Average of column C" |
-| **Sheets** | "Create new sheet named Sales" |
+| Domain | Example |
+|--------|---------|
+| **Visualization** | "Pie chart of sales by region" |
+| **Data Generation** | "Add 500 employee records" |
+| **Presentation** | "Bold header, freeze top row" |
+| **Insight Extraction** | "Find trends in this data" |
+| **Computation** | "Average of column C" |
+| **Structure** | "Create new sheet named Sales" |
 
 ---
 
@@ -132,28 +132,15 @@ Open Excel → Insert → My Add-ins → Browse → select `manifest.xml`
 
 ---
 
-## Key Features
+## Design Philosophy
 
-- Natural language → Excel operations
-- Reasoning agent (toggle on/off)
-- Statistical analysis (100K+ rows)
-- Smart chart generation
-- Multi-sheet management
-- Real-time execution tracking
+Cel implements a multi-agent orchestration pattern where each layer operates with bounded autonomy:
 
-## Agentic Design Patterns
+- **Interpretive Layer** — Decomposes ambiguous requests into structured intent
+- **Synthesis Layer** — Constructs executable plans with dependency awareness
+- **Validation Layer** — Verifies outcomes against expected state
+- **Recovery Layer** — Self-corrects when execution diverges from plan
 
-Based on *Agentic Design Patterns* by Antonio Gulli, Cel implements:
+The system maintains contextual awareness across sessions, adapting to user preferences and learning from operational history. Destructive operations are gated by confirmation protocols, and state transitions are checkpointed for reversible workflows.
 
-| Pattern | How Cel Uses It |
-|---------|-----------------|
-| **Planning** | Planning Agent breaks tasks into executable steps |
-| **Reasoning** | Shows thinking before execution (toggle on/off) |
-| **Tool Use** | Office.js API calls (set_values, create_table, charts) |
-| **Multi-Agent** | Reasoning → Planning → Validator → Reflection |
-| **Reflection** | Auto-recovers from failures (e.g., table overlap) |
-| **Guardrails** | Confirms destructive actions, warns on large writes |
-| **Goal Monitoring** | Tracks step progress: "3/5 steps completed" |
-| **Resource-Aware** | Simple tasks → gpt-4o-mini, Complex → full model |
-| **Exception Handling** | Retry logic, sheet verification, overlap detection |
-| **Routing** | Analysis → /api/analyze, Charts → Office.js, Data → /api/generate-data |
+Provider abstraction enables seamless model switching without architectural changes — the system routes to the appropriate inference endpoint based on configuration, supporting both direct API access and federated gateway patterns.

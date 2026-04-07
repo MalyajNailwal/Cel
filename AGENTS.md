@@ -12,7 +12,7 @@
 ### Pattern
 
 <!-- lore:019d6775-cb41-736a-aac8-2546d972493d -->
-* **Memory system for persistent preferences**: Cel uses a lightweight memory system (lib/memory.ts) for persistent user preferences and formatting conventions. Store in localStorage with keys: 'cel-user-rules' (array of rule strings), 'cel-formatting-conventions' (currency symbol, date format, number format, negative style). Memory context is injected into API calls alongside workbook\_context and selected\_range. Rules and conventions are passed as separate fields to the backend for system prompt injection.
+* **Memory system for persistent preferences**: Cel uses a lightweight memory system (lib/memory.ts) for persistent user preferences and formatting conventions. Store in localStorage with keys: 'cel-user-rules' (array of rule strings), 'cel-formatting-conventions' (currency symbol, date format, number format, negative style). Memory context is injected into API calls alongside workbook\_context and selected\_range. Rules and conventions are passed as separate fields to the backend for system prompt injection. UI is built in SettingsPanel with two new tabs: 'Memory' (RulesEditor, CheckpointList, OperationHistory components) and 'Conventions' (ConventionsEditor component). Checkpoints auto-snapshot before write operations with one-click restore.
 
 ### Preference
 
