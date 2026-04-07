@@ -191,8 +191,12 @@ export default function App() {
           } catch (e) { console.log('[DEBUG] selectedRangeData parse error:', e); }
         }
 
-        // Check if user is referring to selected area
-        const userWantsSelected = /selected|these|this|here|highlighted|current|this range|these cells|put here|write here|add here|fill here|fill some|random data/i.test(userMessage);
+        // If user has a selection AND is modifying data (not creating new sheet), use the selection
+        const hasSelection = selectedRange && selectedRange.address;
+        const createsNewSheet = /new sheet|another sheet|make sheet|create sheet/i.test(userMessage);
+        const modifiesExisting = /add|write|put|fill|update|change|modify|calculate|compute|less|more|subtract|increase|decrease/i.test(userMessage);
+        const userWantsSelected = hasSelection && !createsNewSheet && (modifiesExisting || /selected|here|this range|these cells/i.test(userMessage));
+        console.log('[DEBUG] userWantsSelected:', userWantsSelected, '| hasSelection:', hasSelection, '| createsNewSheet:', createsNewSheet);
         console.log('[DEBUG] userWantsSelected regex test for:', userMessage, '→ result:', userWantsSelected);
 
         // Check if user wants data generation
