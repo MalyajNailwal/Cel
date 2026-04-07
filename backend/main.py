@@ -30,6 +30,7 @@ class ChatRequest(BaseModel):
     api_key: str
     workbook_context: Optional[str] = None
     selected_range: Optional[str] = None
+    memory_context: Optional[str] = None
     enable_reasoning: Optional[bool] = True
 
 
@@ -112,6 +113,7 @@ TASK_DESCRIPTION = """Create a JSON plan for this Excel request: {message}
 
 {context_info}
 {selected_info}
+{memory_info}
 
 Available actions: get_workbook_structure, get_selected_range, get_range, get_sheet_data,
 set_values, set_formulas, apply_format, insert_rows, delete_rows, insert_columns,
@@ -966,6 +968,9 @@ async def chat(req: ChatRequest):
         selected_info = (
             f"Selected range: {req.selected_range}" if req.selected_range else ""
         )
+        memory_info = (
+            f"Memory context:\n{req.memory_context}" if req.memory_context else ""
+        )
 
         # Only run reasoning agent if enabled
         reasoning = ""
@@ -1035,6 +1040,7 @@ Keep it short and clear. No asterisks.""",
                 message=req.message,
                 context_info=context_info,
                 selected_info=selected_info,
+                memory_info=memory_info,
             ),
             expected_output="A JSON object with 'plan' array and 'response' string.",
             agent=planner,

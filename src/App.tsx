@@ -5,6 +5,7 @@ import { ChatInput } from '@/components/ChatInput';
 import { SettingsPanel } from '@/components/SettingsPanel';
 import type { ChatMessage, AIProvider } from '@/lib/ai-providers';
 import * as ExcelAPI from '@/lib/excel-api';
+import { loadMemory, saveMemory, addMistake, trackOperation, addCheckpoint, getCheckpoints, getMemoryContext } from '@/lib/memory';
 
 type ProcessingPhase = 'idle' | 'thinking' | 'reasoning' | 'planning' | 'analyzing' | 'confirming' | 'executing' | 'validating';
 
@@ -141,6 +142,7 @@ export default function App() {
             api_key: apiKey,
             workbook_context: workbookContext,
             selected_range: selectedRangeData,
+            memory_context: getMemoryContext(),
             enable_reasoning: reasoningEnabled,
           }),
         });
@@ -1054,6 +1056,32 @@ export default function App() {
             let lastError = '';
             let lastSuccess = false;
             let successOutput = '';
+
+            // Checkpoint: Snapshot cells before mutation
+            const writeActions = ['set_values', 'set_formulas', 'apply_format', 'delete_rows', 'delete_columns', 'insert_rows', 'insert_columns'];
+            if (writeActions.includes(step.action) && params.address) {
+              try {
+                let sheetName = params.sheet_name;
+                if (!sheetName) {
+                  const ctx = await getWorkbookContext();
+                  if (ctx) {
+                    sheetName = JSON.parse(ctx).activeSheet;
+                  }
+                }
+                if (sheetName) {
+                  const currentData = await ExcelAPI.getRange(params.address, sheetName);
+                  if (currentData && currentData.values) {
+                    addCheckpoint({
+                      sheet: sheetName,
+                      address: params.address,
+                      values: currentData.values,
+                      description: `Before ${step.action}: ${step.description || step.action}`,
+                    });
+                  }
+                }
+              } catch {}
+            }
+
             while (retryCount < 2) {
               try {
                 const result = await executeStep(fixedStep);
@@ -1080,6 +1108,8 @@ export default function App() {
             if (lastSuccess) {
               executionResults.push({ action: step.action, success: true, output: successOutput });
               completedSteps++;
+              // Track operation for memory
+              trackOperation(step.action);
               // Goal monitoring - track progress
               if (totalSteps > 1) {
                 validationErrors.push(`Progress: ${completedSteps}/${totalSteps} steps completed`);
@@ -1092,6 +1122,8 @@ export default function App() {
               }
             } else {
               executionResults.push({ action: step.action, success: false, output: lastError });
+              // Record mistake for future avoidance
+              addMistake(`${step.action} failed: ${lastError.slice(0, 100)}`, `Retry with corrected parameters`);
               
               // If table overlap error, add helpful message
               if (step.action === 'create_table' && lastError.toLowerCase().includes('overlap')) {
