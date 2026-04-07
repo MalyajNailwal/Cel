@@ -67,12 +67,8 @@ Analyze the user's request and explain:
 Keep it conversational and clear. Use bullet points."""
 
 
-def setup_provider(provider: str, model: str, api_key: str):
-    """
-    Root fix: Configure environment variables for CrewAI/LiteLLM.
-    This avoids passing LangChain objects which cause version conflicts.
-    """
-    # Clear previous keys to avoid conflicts
+def setup_env(provider: str, model: str, api_key: str) -> str:
+    """Configure environment variables for CrewAI and return the model string to use."""
     keys_to_clear = [
         "OPENAI_API_KEY",
         "OPENAI_API_BASE",
@@ -81,23 +77,24 @@ def setup_provider(provider: str, model: str, api_key: str):
         "ANTHROPIC_MODEL_NAME",
         "GOOGLE_API_KEY",
         "GOOGLE_MODEL_NAME",
+        "OPENROUTER_API_KEY",
     ]
     for k in keys_to_clear:
         os.environ.pop(k, None)
 
     if provider == "openrouter":
-        os.environ["OPENAI_API_KEY"] = api_key
-        os.environ["OPENAI_API_BASE"] = "https://openrouter.ai/api/v1"
-        os.environ["OPENAI_MODEL_NAME"] = model
+        os.environ["OPENROUTER_API_KEY"] = api_key
+        return "openrouter/" + model
     elif provider == "openai":
         os.environ["OPENAI_API_KEY"] = api_key
-        os.environ["OPENAI_MODEL_NAME"] = model
     elif provider == "anthropic":
         os.environ["ANTHROPIC_API_KEY"] = api_key
-        os.environ["ANTHROPIC_MODEL_NAME"] = model
     elif provider == "google":
         os.environ["GOOGLE_API_KEY"] = api_key
-        os.environ["GOOGLE_MODEL_NAME"] = model
+    else:
+        os.environ["OPENAI_API_KEY"] = api_key
+
+    return model
 
 
 SYSTEM_PROMPT = """You are an expert Excel analyst. You create detailed, executable plans for Excel operations.
@@ -503,7 +500,7 @@ async def analyze_large_data(req: AnalyzeRequest):
     try:
         from crewai import Agent, Task, Crew, Process
 
-        setup_provider(req.provider, req.model, req.api_key)
+        model = setup_env(req.provider, req.model, req.api_key)
 
         stats = compute_large_data_stats(req.data)
 
@@ -527,7 +524,7 @@ Keep it short. No asterisks (*)."""
             You focus on aggregated insights and patterns rather than individual data points.""",
             verbose=False,
             allow_delegation=False,
-            llm=req.model,
+            llm=model,
         )
 
         analysis_task = Task(
@@ -961,7 +958,7 @@ async def chat(req: ChatRequest):
     try:
         from crewai import Agent, Task, Crew, Process
 
-        setup_provider(req.provider, req.model, req.api_key)
+        model = setup_env(req.provider, req.model, req.api_key)
 
         context_info = (
             f"Workbook context: {req.workbook_context}" if req.workbook_context else ""
@@ -987,7 +984,7 @@ IMPORTANT:
 - If complex (like "analyze 1000 rows and make chart"), break into clear steps""",
                 verbose=False,
                 allow_delegation=False,
-                llm=req.model,
+                llm=model,
             )
 
             reasoning_task = Task(
@@ -1030,7 +1027,7 @@ Keep it short and clear. No asterisks.""",
             backstory=SYSTEM_PROMPT,
             verbose=False,
             allow_delegation=False,
-            llm=req.model,
+            llm=model,
         )
 
         plan_task = Task(
@@ -1077,7 +1074,7 @@ async def execute_plan(req: ExecuteRequest):
     try:
         from crewai import Agent, Task, Crew, Process
 
-        setup_provider(req.provider, req.model, req.api_key)
+        model = setup_env(req.provider, req.model, req.api_key)
 
         validator = Agent(
             role="Excel Validator",
@@ -1085,7 +1082,7 @@ async def execute_plan(req: ExecuteRequest):
             backstory=VALIDATOR_PROMPT,
             verbose=True,
             allow_delegation=False,
-            llm=req.model,
+            llm=model,
         )
 
         results_str = json.dumps(req.results, indent=2)
@@ -1155,7 +1152,7 @@ At the end, mention which 2 columns would make a good chart (e.g., "Team vs Tota
             backstory=ANALYSIS_AGENT_PROMPT,
             verbose=False,
             allow_delegation=False,
-            llm=req.model,
+            llm=get_llm(req.provider, req.model, req.api_key),
         )
 
         analysis_task = Task(
