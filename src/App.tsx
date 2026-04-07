@@ -128,8 +128,18 @@ export default function App() {
 
         // Resource-aware: Use cheaper model for simple tasks, full model for complex
         const isComplexTask = /analyze|statistics|trends|outliers|distribution|compare|chart|graph|table.*\d{3,}/i.test(userMessage);
-        const isGptModel = settings.model.includes('gpt');
-        const effectiveModel = isComplexTask ? settings.model : (isGptModel ? 'gpt-4o-mini' : settings.model);
+        
+        // Map provider to its cheapest model
+        const cheapModels: Record<string, string> = {
+          openai: 'gpt-4o-mini',
+          anthropic: 'claude-3-haiku-20240307',
+          google: 'gemini-1.5-flash',
+          openrouter: 'openrouter/auto', // Let OpenRouter pick cheapest
+        };
+        
+        const effectiveModel = isComplexTask 
+          ? settings.model 
+          : (cheapModels[settings.provider] || settings.model);
 
         setProcessingPhase('planning');
         const planResponse = await fetch('/api/chat', {
@@ -292,7 +302,7 @@ export default function App() {
                 data: selectedData,
                 question: userMessage,
                 provider: settings.provider,
-                model: settings.model,
+                model: effectiveModel,
                 api_key: apiKey,
                 headers: selectedData[0] || [],
               }),
@@ -1103,7 +1113,7 @@ export default function App() {
                   plan: validSteps,
                   results: executionResults,
                   provider: settings.provider,
-                  model: settings.model,
+                  model: effectiveModel,
                   api_key: apiKey,
                 }),
               });
@@ -1164,7 +1174,7 @@ export default function App() {
           body: JSON.stringify({
             message: userMessage,
             provider: settings.provider,
-            model: settings.model,
+            model: effectiveModel,
             api_key: apiKey,
             results: executionResults,
           }),
