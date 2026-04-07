@@ -807,7 +807,8 @@ export default function App() {
           if (step.action === 'apply_format') {
             const hasBorderParams = params.border_all || params.border_color || params.border_style || params.border_weight;
             if (!hasBorderParams && /border/i.test(userMessage)) {
-              const borderColorMatch = userMessage.match(/\b(red|blue|green|black|white|grey|gray|yellow|orange|purple|pink|brown|cyan|magenta|navy|teal|maroon|olive|gold|silver|copper|bronze)\b/i);
+              const msg = userMessage.toLowerCase();
+              const borderColorMatch = msg.match(/\b(red|blue|green|black|white|grey|gray|yellow|orange|purple|pink|brown|cyan|magenta|navy|teal|maroon|olive|gold|silver|copper|bronze)\b/i);
               const colorToHex: Record<string, string> = {
                 red: '#FF0000', blue: '#0000FF', green: '#008000', black: '#000000', white: '#FFFFFF',
                 grey: '#808080', gray: '#808080', yellow: '#FFFF00', orange: '#FFA500', purple: '#800080',
@@ -817,9 +818,15 @@ export default function App() {
               };
               params.border_all = true;
               params.border_color = borderColorMatch ? (colorToHex[borderColorMatch[1].toLowerCase()] || '#000000') : '#000000';
-              params.border_style = 'Continuous';
-              params.border_weight = 'Thin';
-              validationErrors.push(`Step ${i + 1}: Auto-injected border with color ${params.border_color}`);
+              if (/thick/i.test(msg)) params.border_weight = 'Thick';
+              else if (/medium/i.test(msg)) params.border_weight = 'Medium';
+              else if (/hairline/i.test(msg)) params.border_weight = 'Hairline';
+              else params.border_weight = 'Thin';
+              if (/dash/i.test(msg)) params.border_style = 'Dash';
+              else if (/dot/i.test(msg)) params.border_style = 'Dot';
+              else if (/double/i.test(msg)) params.border_style = 'Double';
+              else params.border_style = 'Continuous';
+              validationErrors.push(`Step ${i + 1}: Auto-injected border (color: ${params.border_color}, style: ${params.border_style}, weight: ${params.border_weight})`);
             }
             const HEX_REGEX = /^#[0-9A-Fa-f]{6}$/;
             const COLOR_MAP: Record<string, string> = {
