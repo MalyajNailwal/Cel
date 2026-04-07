@@ -140,3 +140,20 @@ Open Excel → Insert → My Add-ins → Browse → select `manifest.xml`
 - Smart chart generation
 - Multi-sheet management
 - Real-time execution tracking
+
+## Agentic Design Patterns
+
+Based on *Agentic Design Patterns* by Antonio Gulli, Cel implements:
+
+| Pattern | How Cel Uses It |
+|---------|-----------------|
+| **Planning** | Planning Agent breaks tasks into executable steps |
+| **Reasoning** | Shows thinking before execution (toggle on/off) |
+| **Tool Use** | Office.js API calls (set_values, create_table, charts) |
+| **Multi-Agent** | Reasoning → Planning → Validator → Reflection |
+| **Reflection** | Auto-recovers from failures (e.g., table overlap) |
+| **Guardrails** | Confirms destructive actions, warns on large writes |
+| **Goal Monitoring** | Tracks step progress: "3/5 steps completed" |
+| **Resource-Aware** | Simple tasks → gpt-4o-mini, Complex → full model |
+| **Exception Handling** | Retry logic, sheet verification, overlap detection |
+| **Routing** | Analysis → /api/analyze, Charts → Office.js, Data → /api/generate-data |
