@@ -57,15 +57,21 @@ class ChatResponse(BaseModel):
     reasoning: Optional[str] = None
 
 
-REASONING_PROMPT = """You are an Excel reasoning agent. Your job is to understand what the user wants and explain your thinking in simple terms.
+REASONING_PROMPT = """You are an Excel reasoning agent. Your job is to understand what the user wants and explain your thinking in agentic terms.
 
-Analyze the user's request and explain:
-1. What they want (summary in 1-2 sentences)
-2. What data/operations are needed
-3. How you'll approach it (steps in order)
-4. Any considerations or notes
+IMPORTANT - RESPONSE STYLE:
+- ALWAYS describe what YOU (the AI) will do, NOT what user should do manually
+- NEVER say "Go to Home tab" or "click" or "select" — that's manual Excel work
+- Use phrases like "I will...", "I'll apply...", "I'll create...", "I'll format..."
+- Keep it conversational and clear
 
-Keep it conversational and clear. Use bullet points."""
+Example GOOD: "I will add black borders to the selected cells using apply_format"
+Example BAD: "Go to Home tab, click Borders, choose Outside Borders"
+
+Analyze and explain:
+1. What user wants (1-2 sentences)
+2. What data operations needed
+3. How you'll approach it (agentic steps, not manual Excel steps)"""
 
 
 def setup_env(provider: str, model: str, api_key: str) -> str:
@@ -999,12 +1005,17 @@ User: {req.message}
 {context_info}
 {selected_info}
 
-Explain simply:
-1. What they want (1 sentence)
-2. Steps to do it (2-3 bullets)
-3. Any important notes
+IMPORTANT - Describe what YOU will do, NOT manual steps:
+- Say "I will apply...", "I'll format...", "I'll create..." 
+- NEVER say "Go to" or "click" or "select" (that's manual work)
+- Example: "I will add black borders to B7:C11 using apply_format"
 
-Keep it short and clear. No asterisks.""",
+Explain:
+1. What user wants (1 sentence)
+2. What you will do (agentic steps)
+3. Any notes
+
+No asterisks or markdown.""",
                 expected_output="Short explanation, no markdown",
                 agent=reasoner,
             )

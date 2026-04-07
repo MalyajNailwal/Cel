@@ -12,7 +12,7 @@
 ### Gotcha
 
 <!-- lore:019d6795-50a8-7000-aa5d-40a5574c1f44 -->
-* **apply\_format execution missing border params**: apply\_format fails at TWO points: (1) AI planner doesn't generate border params (border\_all, border\_color, border\_style, border\_weight) even when backend prompt instructs it to; (2) execution handler in App.tsx must also pass those params to ExcelAPI.applyFormat(). Fix: Frontend validation fallback - if user message mentions 'border' but plan lacks border params, auto-inject border\_all=true, border\_color='#000000', border\_style='Continuous', border\_weight='Thin'. Also add 'border' to userWantsSelected regex (line 200) so execution loop uses selected range for border operations instead of AI-generated address.
+* **apply\_format execution missing border params**: apply\_format fails at THREE points: (1) AI planner doesn't generate border params; (2) App.tsx execution handler passes borders config but omits \`all: true\` property — ExcelAPI.applyFormat checks \`b.all\` at line 253 before applying borders, so silent failure occurs without it; (3) ExcelAPI.applyFormat must receive valid border object. Fix: Add \`all: true\` to borders config in App.tsx line 1438: \`{ all: true, color: ..., style: ..., weight: ... }\`. Also add 'border' to userWantsSelected regex (line 200) so execution uses selected range.
 
 ### Pattern
 
