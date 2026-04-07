@@ -41,6 +41,7 @@ const modelOptions: Record<AIProvider, { value: string; label: string; tier?: st
     { value: 'gemini-1.5-pro', label: 'Gemini 1.5 Pro', tier: 'Best' },
   ],
   openrouter: [
+    { value: 'stepfun/step-3.5-flash:free', label: 'Step-3.5 Flash (Free)', tier: 'Free' },
     { value: 'google/gemini-2.0-flash-exp:free', label: 'Gemini 2.0 Flash (Free)', tier: 'Free' },
     { value: 'google/gemini-2.0-flash-lite:free', label: 'Gemini 2.0 Flash Lite (Free)', tier: 'Free' },
     { value: 'meta-llama/llama-3.3-70b-instruct:free', label: 'Llama 3.3 70B (Free)', tier: 'Free' },
@@ -123,12 +124,15 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onSave, 
   const [showKey, setShowKey] = useState<Record<string, boolean>>({});
 
   const handleProviderChange = useCallback((provider: AIProvider) => {
+    // Only reset model if current model isn't available in new provider
+    const newProviderModels = modelOptions[provider].map(m => m.value);
+    const currentModelExists = newProviderModels.includes(local.model);
     setLocal((prev) => ({
       ...prev,
       provider,
-      model: modelOptions[provider][0].value,
+      model: currentModelExists ? prev.model : modelOptions[provider][0].value,
     }));
-  }, []);
+  }, [local.model]);
 
   const handleSave = useCallback(() => {
     onSave(local);
@@ -294,6 +298,18 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onSave, 
                       )}
                     </button>
                   ))}
+                </div>
+                
+                {/* Custom Model Input */}
+                <div className="mt-3">
+                  <input
+                    type="text"
+                    value={local.model}
+                    onChange={(e) => setLocal((prev) => ({ ...prev, model: e.target.value }))}
+                    placeholder="Or type custom model ID..."
+                    className="w-full px-3 py-2 text-xs border border-gray-200 rounded-lg focus:outline-none focus:border-[#217346] focus:ring-1 focus:ring-[#217346]"
+                  />
+                  <p className="text-[10px] text-gray-400 mt-1">Type any model ID (e.g., stepfun/step-3.5-flash:free)</p>
                 </div>
               </div>
 
