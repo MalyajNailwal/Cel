@@ -1116,7 +1116,7 @@ async def analyze_data(req: AnalyzeRequest):
     try:
         from crewai import Agent, Task, Crew, Process
 
-        setup_provider(req.provider, req.model, req.api_key)
+        model = setup_env(req.provider, req.model, req.api_key)
 
         stats = compute_statistics(req.data)
         trends = find_trends(req.data)
@@ -1152,7 +1152,7 @@ At the end, mention which 2 columns would make a good chart (e.g., "Team vs Tota
             backstory=ANALYSIS_AGENT_PROMPT,
             verbose=False,
             allow_delegation=False,
-            llm=get_llm(req.provider, req.model, req.api_key),
+            llm=model,
         )
 
         analysis_task = Task(
