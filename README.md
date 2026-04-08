@@ -2,7 +2,7 @@
 
 **Intelligent Spreadsheet Orchestration**
 
-Cel redefines human-computer interaction with spreadsheets. Rather than navigating menus and formulas, you express intent — the system interprets, plans, and materializes outcomes directly within your workbook.
+Cel is an autonomous Excel agent that interprets intent, plans execution, and delivers outcomes — with enterprise-grade guardrails that exceed native capabilities.
 
 ---
 
@@ -13,8 +13,8 @@ Cel redefines human-computer interaction with spreadsheets. Rather than navigati
 │                                 USER                                         │
 │                    "Create pie chart of sales by region"                   │
 └──────────────────────────────────┬──────────────────────────────────────────┘
-                                   │
-                                   ▼
+                                    │
+                                    ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                            FRONTEND                                          │
 │  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌──────────────┐  │
@@ -22,38 +22,39 @@ Cel redefines human-computer interaction with spreadsheets. Rather than navigati
 │  └─────────────┘    └─────────────┘    └─────────────┘    └──────────────┘  │
 │         │                                         │                          │
 │         │            ┌─────────────┐              │                          │
-│         └───────────▶│  TypingInd  │              │                          │
+│         └───────────▶│  Streaming  │              │                          │
 │                      └─────────────┘              │                          │
 └──────────────────────────────────────────────────┼──────────────────────────┘
-                                                   │
-                    ┌──────────────────────────────┼──────────────────────┐
-                    │                              ▼                       │
-                    │                   ┌──────────────────┐               │
-                    │                   │  Backend (FastAPI)│               │
-                    │                   └────────┬─────────┘               │
-                    │                            │                        │
-                    ▼                            ▼                        │
+                                                    │
+                     ┌──────────────────────────────┼──────────────────────┐
+                     │                              ▼                       │
+                     │                   ┌──────────────────┐               │
+                     │                   │  Backend (FastAPI)│               │
+                     │                   └────────┬─────────┘               │
+                     │                            │                        │
+                     ▼                            ▼                        │
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                              BACKEND                                         │
 │                                                                              │
-│  ┌────────────────┐    ┌────────────────┐    ┌────────────────────────┐  │
-│  │  Reasoning     │───▶│   Planning      │───▶│      Executor          │  │
-│  │    Agent       │    │    Agent        │    │   (Frontend)           │  │
-│  │  (CrewAI)      │    │  (CrewAI)       │    │                        │  │
-│  └───────┬────────┘    └────────┬────────┘    └────────────────────────┘  │
-│          │                      │                                                │
-│          │          ┌───────────┴───────────┐                                 │
-│          │          │                       │                                 │
-│          ▼          ▼                       ▼                                 │
-│  ┌────────────────────┐    ┌────────────────────┐    ┌─────────────────┐  │
-│  │   Analysis         │    │   Chart             │    │    Data         │  │
-│  │   Agent            │    │   Generator         │    │    Generator    │  │
-│  │ (stats, trends)    │    │  (Office.js)       │    │ (sample data)   │  │
-│  └────────────────────┘    └────────────────────┘    └─────────────────┘  │
+│  ┌��───────────────┐    ┌────────────────┐    ┌────────────────────────┐  │
+│  │  Reasoning     │───▶│   Planning      │───▶│      Validation          │  │
+│  │    Agent       │    │    Agent        │    │       Agent              │  │
+│  │  (CrewAI)      │    │  (CrewAI)       │    │    (CrewAI)             │  │
+│  └───────┬────────┘    └────────┬────────┘    └────────┬───────────┘  │
+│          │                      │                      │              │
+│          │          ┌───────────┴───────────┐          │              │
+│          │          │   Connected Flow   │◀─────────┘              │
+│          │          │ (Reasoning→Planner) │                           │
+│          ▼          ▼                   ▼                           │
+│  ┌─────────────────────────────────────────────────────────────────────┐  │
+│  │                    Multi-Layer Guardrails                           │  │
+│  │  • Formula Validation    • Error Detection    • Timeout           │  │
+│  │  • Pre-execution Review  • Checkpointing     • Recovery           │  │
+│  └─────────────────────────────────────────────────────────────────────┘  │
 │                                                                              │
 │  ┌───────────────────────────────────────────────────────────────────────┐  │
 │  │                        AI Providers                                   │  │
-│  │         OpenAI • Anthropic • Google • OpenRouter (custom)            │  │
+│  │         OpenAI • Anthropic • Google • OpenRouter (any model)            │  │
 │  └───────────────────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -64,9 +65,26 @@ Cel redefines human-computer interaction with spreadsheets. Rather than navigati
 
 1. **Intent Capture** — Express requirements in natural language
 2. **Cognitive Layer** — System decomposes and validates approach (toggleable)
-3. **Plan Synthesis** — Generates executable operation sequence
+3. **Agent Pipeline** — Reasoning→Planner→Validator (all connected)
 4. **Materialization** — Operations applied via native spreadsheet APIs
 5. **Outcome Delivery** — Results presented with contextual validation
+6. **Recovery** — Self-corrects when execution diverges from plan
+
+---
+
+## Why Cel Exceeds Native Capabilities
+
+| Feature | Cel | Microsoft Agent |
+|---------|-----|-----------------|
+| **Agent Pipeline** | Reasoning→Planner→Validator (connected) | Single agent |
+| **Formula Validation** | ✅ Checks parentheses, arguments | ❌ |
+| **Error Detection** | ✅ Warns #N/A, #DIV/0! risk | ❌ Produces errors |
+| **Pre-execution Review** | ✅ Shows plan, user confirms | ❌ |
+| **Operation Timeout** | ✅ 2-min max, prevents infinite loops | ❌ |
+| **Memory System** | ✅ Checkpoints, rules, conventions | ❌ |
+| **Recovery** | ✅ Automatic self-correction | Limited |
+| **Streaming** | ✅ Real-time response chunks | ❌ |
+| **Dynamic Model** | ✅ Any model ID (no hardcoding) | Fixed |
 
 ---
 
