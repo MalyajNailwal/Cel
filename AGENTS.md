@@ -24,7 +24,7 @@
 * **Reasoning agent outputs manual Excel steps instead of agentic actions**: Reasoning agent was generating non-agentic output like "Go to Home tab → click Borders" instead of agentic "I will apply black borders using apply\_format". Fix: Updated REASONING\_PROMPT and reasoning\_task in backend/main.py (lines ~60 and ~1001) to explicitly instruct the AI to describe what actions it WILL take, not manual Excel steps. The prompt now says: "Explain what YOU (the AI assistant) will do, not what the user should do manually in Excel".
 
 <!-- lore:019d6be1-3a8d-795a-ba59-b1cf10ce9f23 -->
-* **window.confirm not supported in Office.js task pane**: Office.js task pane runs in a restricted environment that doesn't support browser dialogs like window.conf() and window.alert(). Pre-execution review feature (window.confirm before executing plan) fails with "Function window.confirm is not supported". Fix: Replace all window.confirm calls in App.tsx (lines 607, 625, 645, 662, 723) with a custom modal component using React state, or add try-catch fallback that silently proceeds when confirm is unavailable.
+* **window.confirm not supported in Office.js task pane**: Office.js task pane doesn't support window.confirm/alert. Solution: Created ConfirmModal component (src/components/ConfirmModal.tsx) with useConfirm hook that returns async confirm() function. Component renders modal with title, message, confirm/cancel buttons, and variant styles (danger/warning/primary). Import useConfirm in App.tsx, add ConfirmModalComponent to JSX, replace all 5 window.confirm calls with confirm(). Build passes, committed 7b34e7d.
 
 ### Pattern
 

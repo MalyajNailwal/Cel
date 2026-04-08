@@ -30,24 +30,26 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div className="absolute inset-0 bg-black/50" onClick={onCancel} />
-      <div className="relative bg-white rounded-lg shadow-xl max-w-md w-full mx-4 p-6">
-        <h3 className="text-lg font-semibold text-gray-900 mb-2">{title}</h3>
-        <p className="text-gray-600 mb-6 whitespace-pre-wrap">{message}</p>
-        <div className="flex justify-end gap-3">
-          <button
-            onClick={onCancel}
-            className="px-4 py-2 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg font-medium transition-colors"
-          >
-            {cancelLabel}
-          </button>
-          <button
-            onClick={onConfirm}
-            className={`px-4 py-2 rounded-lg font-medium transition-colors ${buttonStyles[confirmVariant]}`}
-          >
-            {confirmLabel}
-          </button>
+    <div className="fixed inset-y-0 right-0 z-50 flex items-center justify-center pointer-events-none">
+      <div className="absolute inset-0 bg-black/30 pointer-events-auto" onClick={onCancel} />
+      <div className="relative bg-white rounded-l-lg shadow-2xl w-80 max-h-[90vh] overflow-auto pointer-events-auto mr-4 my-auto">
+        <div className="p-4">
+          <h3 className="text-sm font-bold text-gray-900 mb-2">{title}</h3>
+          <p className="text-xs text-gray-600 mb-4 whitespace-pre-wrap max-h-32 overflow-y-auto">{message}</p>
+          <div className="flex gap-2">
+            <button
+              onClick={onCancel}
+              className="flex-1 px-3 py-1.5 text-xs text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md font-medium transition-colors"
+            >
+              {cancelLabel}
+            </button>
+            <button
+              onClick={onConfirm}
+              className={`flex-1 px-3 py-1.5 text-xs rounded-md font-medium transition-colors ${buttonStyles[confirmVariant]}`}
+            >
+              {confirmLabel}
+            </button>
+          </div>
         </div>
       </div>
     </div>
