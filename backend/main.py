@@ -36,6 +36,7 @@ class ChatRequest(BaseModel):
 
 class ExecuteRequest(BaseModel):
     message: str
+    plan: list = []
     provider: str = "openai"
     model: str = "gpt-4o"
     api_key: str
@@ -121,6 +122,9 @@ TASK_DESCRIPTION = """Create a JSON plan for this Excel request: {message}
 {selected_info}
 {memory_info}
 
+Reasoning analysis:
+{reasoning_output}
+
 Available actions: get_workbook_structure, get_selected_range, get_range, get_sheet_data,
 set_values, set_formulas, apply_format, insert_rows, delete_rows, insert_columns,
 delete_columns, add_worksheet, delete_worksheet, create_table, sort_range, auto_fill, create_chart
@@ -177,6 +181,9 @@ CRITICAL RULES — FOLLOW THESE EXACTLY:
 
 VALIDATOR_PROMPT = """You verify that Excel operations completed successfully and summarize what was done."""
 VALIDATOR_TASK = """Original request: {message}
+
+Planned approach:
+{plan_info}
 
 Execution results:
 {results_str}
@@ -1052,6 +1059,7 @@ No asterisks or markdown.""",
                 context_info=context_info,
                 selected_info=selected_info,
                 memory_info=memory_info,
+                reasoning_output=reasoning if reasoning else "No reasoning available",
             ),
             expected_output="A JSON object with 'plan' array and 'response' string.",
             agent=planner,
@@ -1103,10 +1111,20 @@ async def execute_plan(req: ExecuteRequest):
         )
 
         results_str = json.dumps(req.results, indent=2)
+        plan_str = (
+            "\n".join(
+                [
+                    f"{i + 1}. {s.get('action', 'unknown')}: {s.get('description', '')}"
+                    for i, s in enumerate(req.plan)
+                ]
+            )
+            if req.plan
+            else "No plan available"
+        )
 
         validate_task = Task(
             description=VALIDATOR_TASK.format(
-                message=req.message, results_str=results_str
+                message=req.message, plan_info=plan_str, results_str=results_str
             ),
             expected_output="A clear user-friendly summary.",
             agent=validator,

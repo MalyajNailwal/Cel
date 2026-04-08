@@ -1239,6 +1239,7 @@ export default function App() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             message: userMessage,
+            plan: plan,
             provider: settings.provider,
             model: effectiveModel,
             api_key: apiKey,
