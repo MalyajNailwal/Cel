@@ -663,27 +663,11 @@ export default function App() {
           }
         }
 
-        // Pre-execution Review: Show full plan and ask for confirmation
+        // Pre-execution Review: Show plan in chat (no modal confirmation for scale)
         const planSummary = plan.map((s: any, idx: number) => 
           `${idx + 1}. ${s.action}${s.params?.address ? ` (${s.params.address})` : ''}: ${s.description || ''}`
         ).join('\n');
-        
-        setProcessingPhase('confirming');
-        const confirmExecution = await confirm(
-          `Ready to execute ${plan.length} step(s):\n\n${planSummary}\n\nContinue?`,
-          { title: 'Pre-execution Review', confirmLabel: 'Execute' }
-        );
-        
-        if (!confirmExecution) {
-          setMessages((prev) => [...prev, {
-            id: `ai-${Date.now()}`,
-            role: 'assistant',
-            content: 'Execution cancelled by user.',
-          }]);
-          setIsProcessing(false);
-          setProcessingPhase('idle');
-          return;
-        }
+        validationErrors.push(`Plan: ${planSummary}`);
 
         // Error Detection: Check for potential Excel errors before execution
         const potentialErrors: string[] = [];
