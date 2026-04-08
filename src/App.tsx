@@ -3,6 +3,7 @@ import { cn } from '@/lib/utils';
 import { MessageBubble, TypingIndicator, WelcomeScreen } from '@/components/MessageBubble';
 import { ChatInput } from '@/components/ChatInput';
 import { SettingsPanel } from '@/components/SettingsPanel';
+import { useConfirm, ConfirmModal } from '@/components/ConfirmModal';
 import type { ChatMessage, AIProvider } from '@/lib/ai-providers';
 import * as ExcelAPI from '@/lib/excel-api';
 import { loadMemory, saveMemory, addMistake, trackOperation, addCheckpoint, getCheckpoints, getMemoryContext } from '@/lib/memory';
@@ -64,6 +65,9 @@ export default function App() {
     } catch {}
     return { provider: 'openai' as const, model: '', openaiKey: '', anthropicKey: '', googleKey: '' };
   });
+
+  // Custom confirm modal for Office.js compatibility
+  const { confirm, Modal: ConfirmModalComponent } = useConfirm();
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesRef = useRef<ExtendedMessage[]>([]);
@@ -604,7 +608,10 @@ export default function App() {
           ['delete_worksheet', 'delete_rows', 'delete_columns'].includes(s.action)
         );
         if (hasDestructiveAction) {
-          const confirmDelete = window.confirm('This will delete data. Are you sure you want to continue?');
+          const confirmDelete = await confirm(
+            'This will delete data. Are you sure you want to continue?',
+            { title: 'Confirm Delete', confirmVariant: 'danger', confirmLabel: 'Delete' }
+          );
           if (!confirmDelete) {
             setMessages((prev) => [...prev, {
               id: `ai-${Date.now()}`,
@@ -622,7 +629,10 @@ export default function App() {
           s.action === 'set_values' && s.params?.values?.length > 1000
         );
         if (largeWriteStep) {
-          const confirmLarge = window.confirm(`This will write ${largeWriteStep.params.values.length} rows. Continue?`);
+          const confirmLarge = await confirm(
+            `This will write ${largeWriteStep.params.values.length} rows. Continue?`,
+            { title: 'Large Data Write', confirmVariant: 'warning' }
+          );
           if (!confirmLarge) {
             setMessages((prev) => [...prev, {
               id: `ai-${Date.now()}`,
@@ -642,9 +652,9 @@ export default function App() {
           );
           if (writeStep && writeStep.params.address !== selectedRange.address) {
             setProcessingPhase('confirming');
-            const confirmAddress = window.confirm(
-              `You selected ${selectedRange.address} but the plan wants to write to ${writeStep.params.address}. ` +
-              `Use your selection (${selectedRange.address}) instead?`
+            const confirmAddress = await confirm(
+              `You selected ${selectedRange.address} but the plan wants to write to ${writeStep.params.address}. Use your selection (${selectedRange.address}) instead?`,
+              { title: 'Address Mismatch', confirmVariant: 'warning' }
             );
             if (!confirmAddress) {
               setProcessingPhase('idle');
@@ -659,8 +669,9 @@ export default function App() {
         ).join('\n');
         
         setProcessingPhase('confirming');
-        const confirmExecution = window.confirm(
-          `Ready to execute ${plan.length} step(s):\n\n${planSummary}\n\nContinue?`
+        const confirmExecution = await confirm(
+          `Ready to execute ${plan.length} step(s):\n\n${planSummary}\n\nContinue?`,
+          { title: 'Pre-execution Review', confirmLabel: 'Execute' }
         );
         
         if (!confirmExecution) {
@@ -720,8 +731,9 @@ export default function App() {
           }
         }
         if (potentialErrors.length > 0) {
-          const userConfirmed = window.confirm(
-            `Potential issues detected:\n${potentialErrors.slice(0, 3).join('\n')}\n\nContinue anyway?`
+          const userConfirmed = await confirm(
+            `Potential issues detected:\n${potentialErrors.slice(0, 3).join('\n')}\n\nContinue anyway?`,
+            { title: 'Error Detection Warning', confirmVariant: 'warning', confirmLabel: 'Continue' }
           );
           if (!userConfirmed) {
             setMessages((prev) => [...prev, {
@@ -1591,6 +1603,9 @@ export default function App() {
           onClose={() => setShowSettings(false)}
         />
       )}
+
+      {/* Custom Confirm Modal for Office.js */}
+      {ConfirmModalComponent}
     </div>
   );
 }
