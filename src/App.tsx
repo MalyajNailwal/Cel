@@ -653,6 +653,94 @@ export default function App() {
           }
         }
 
+        // Pre-execution Review: Show full plan and ask for confirmation
+        const planSummary = plan.map((s: any, idx: number) => 
+          `${idx + 1}. ${s.action}${s.params?.address ? ` (${s.params.address})` : ''}: ${s.description || ''}`
+        ).join('\n');
+        
+        setProcessingPhase('confirming');
+        const confirmExecution = window.confirm(
+          `Ready to execute ${plan.length} step(s):\n\n${planSummary}\n\nContinue?`
+        );
+        
+        if (!confirmExecution) {
+          setMessages((prev) => [...prev, {
+            id: `ai-${Date.now()}`,
+            role: 'assistant',
+            content: 'Execution cancelled by user.',
+          }]);
+          setIsProcessing(false);
+          setProcessingPhase('idle');
+          return;
+        }
+
+        // Continue with execution...
+          const potentialErrors: string[] = [];
+          for (const step of plan) {
+            if (step.action === 'set_formulas' && step.params?.formulas) {
+              // Check for VLOOKUP/HLOOKUP with #N/A risk
+              for (const row of step.params.formulas) {
+                if (Array.isArray(row)) {
+                  for (const cell of row) {
+                    if (typeof cell === 'string' && cell.toUpperCase().includes('VLOOKUP')) {
+                      // Warn if lookup value might not exist
+                      potentialErrors.push(`VLOOKUP in ${step.params.address} may return #N/A if lookup value not found - consider wrapping in IFERROR`);
+                    }
+                    if (typeof cell === 'string' && cell.toUpperCase().includes('/')) {
+                      // Check for division
+                      const parts = cell.split('/');
+                      if (parts.length > 1 && parts[1].match(/[A-Z]+\d+|SUM\(|COUNT\(/i)) {
+                        potentialErrors.push(`Division in ${step.params.address} may return #DIV/0! if denominator is zero - consider IFERROR`);
+                      }
+                    }
+                  }
+                }
+              }
+            }
+            if (step.action === 'set_values' && step.params?.values) {
+              // Check for empty cells in data
+              let emptyCells = 0;
+              for (const row of step.params.values) {
+                if (Array.isArray(row)) {
+                  for (const cell of row) {
+                    if (cell === '' || cell === null || cell === undefined) emptyCells++;
+                  }
+                }
+              }
+              if (emptyCells > 0 && step.params.values.length > 1) {
+                potentialErrors.push(`Data in ${step.params.address} has ${emptyCells} empty cells - may cause calculation errors`);
+              }
+              // Check for mixed types in columns
+              for (let col = 0; col < (step.params.values[0]?.length || 0); col++) {
+                let numCount = 0, textCount = 0;
+                for (let row = 1; row < Math.min(step.params.values.length, 10); row++) {
+                  const cell = step.params.values[row]?.[col];
+                  if (typeof cell === 'number') numCount++;
+                  else if (typeof cell === 'string' && cell !== '') textCount++;
+                }
+                if (numCount > 0 && textCount > 0) {
+                  potentialErrors.push(`Column ${col + 1} in ${step.params.address} has mixed text/numbers - may cause calculation issues`);
+                }
+              }
+            }
+          }
+          if (potentialErrors.length > 0) {
+            const userConfirmed = window.confirm(
+              `Potential issues detected:\n${potentialErrors.slice(0, 3).join('\n')}\n\nContinue anyway?`
+            );
+            if (!userConfirmed) {
+              setMessages((prev) => [...prev, {
+                id: `ai-${Date.now()}`,
+                role: 'assistant',
+                content: 'Operation cancelled due to potential errors.',
+              }]);
+              setIsProcessing(false);
+              setProcessingPhase('idle');
+              return;
+            }
+            validationErrors.push(...potentialErrors.map(e => `Warning: ${e}`));
+          }
+
         setProcessingPhase('executing');
         const executionResults: { action: string; success: boolean; output: string }[] = [];
         let lastCreatedSheet: string | null = null;
@@ -660,6 +748,19 @@ export default function App() {
         const knownSheets = new Set<string>();
         let completedSteps = 0;
         const totalSteps = validSteps.length;
+        
+        // Operation Timeout: Max 2 minutes for execution
+        const OPERATION_TIMEOUT_MS = 120000;
+        const STEP_TIMEOUT_MS = 30000;
+        const executionStartTime = Date.now();
+        
+        // Check for timeout before each step
+        const checkTimeout = () => {
+          const elapsed = Date.now() - executionStartTime;
+          if (elapsed > OPERATION_TIMEOUT_MS) {
+            throw new Error(`Operation timed out after ${Math.round(elapsed/1000)}s. Please try again with fewer steps.`);
+          }
+        };
 
         if (workbookContext) {
           try {
@@ -673,6 +774,9 @@ export default function App() {
         console.log(executionSummary);
         
         for (let i = 0; i < validSteps.length; i++) {
+          // Operation Timeout: Check before each step
+          checkTimeout();
+          
           const step = validSteps[i];
           const params = { ...step.params };
 
@@ -847,6 +951,34 @@ export default function App() {
             if (!params.address) {
               params.address = 'A1';
               validationErrors.push(`Step ${i + 1}: Missing address — using "A1"`);
+            }
+            // Formula validation - check for common errors
+            let formulaErrors: string[] = [];
+            for (const row of params.formulas) {
+              if (Array.isArray(row)) {
+                for (const cell of row) {
+                  if (typeof cell === 'string' && cell.startsWith('=')) {
+                    const f = cell.toUpperCase();
+                    // Check for circular reference patterns
+                    if (f.match(/=[A-Z]+\d+:\s*[A-Z]+\d+/)) {
+                      formulaErrors.push(`Potential range error in: ${cell.slice(0, 20)}...`);
+                    }
+                    // Check for unclosed parentheses
+                    const openParens = (f.match(/\(/g) || []).length;
+                    const closeParens = (f.match(/\)/g) || []).length;
+                    if (openParens !== closeParens) {
+                      formulaErrors.push(`Unbalanced parentheses: ${cell.slice(0, 20)}...`);
+                    }
+                    // Check for missing arguments in common functions
+                    if (/\bVLOOKUP\s*\(\s*,/i.test(f) || /\bIF\s*\(\s*,/i.test(f)) {
+                      formulaErrors.push(`Missing argument: ${cell.slice(0, 20)}...`);
+                    }
+                  }
+                }
+              }
+            }
+            if (formulaErrors.length > 0) {
+              validationErrors.push(`Formula warnings: ${formulaErrors.slice(0, 3).join('; ')}`);
             }
           }
 
