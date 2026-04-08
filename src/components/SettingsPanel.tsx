@@ -294,49 +294,14 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onSave, 
               {/* Model Selection */}
               <div>
                 <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Model</label>
-                <div className="grid grid-cols-1 gap-1.5 max-h-40 overflow-y-auto pr-1">
-                  {currentModel.map((m) => (
-                    <button
-                      key={m.value}
-                      onClick={() => setLocal((prev) => ({ ...prev, model: m.value }))}
-                      className={cn(
-                        'flex items-center justify-between px-3 py-2 rounded-lg border transition-all text-left',
-                        local.model === m.value
-                          ? 'border-[#217346] bg-[#217346]/5'
-                          : 'border-gray-100 hover:border-gray-200 hover:bg-gray-50'
-                      )}
-                    >
-                      <div>
-                        <div className={cn('text-xs font-medium', local.model === m.value ? 'text-[#217346]' : 'text-gray-700')}>{m.label}</div>
-                      </div>
-                      {m.tier && (
-                        <span className={cn(
-                          'text-[9px] font-semibold px-1.5 py-0.5 rounded-full',
-                          m.tier === 'Recommended' ? 'bg-emerald-100 text-emerald-700' :
-                          m.tier === 'Best' ? 'bg-purple-100 text-purple-700' :
-                          m.tier === 'Fast' ? 'bg-blue-100 text-blue-700' :
-                          m.tier === 'Free' ? 'bg-green-100 text-green-700' :
-                          m.tier === 'Cheap' ? 'bg-amber-100 text-amber-700' :
-                          'bg-gray-100 text-gray-600'
-                        )}>
-                          {m.tier}
-                        </span>
-                      )}
-                    </button>
-                  ))}
-                </div>
-                
-                {/* Custom Model Input */}
-                <div className="mt-3">
-                  <input
-                    type="text"
-                    value={local.model}
-                    onChange={(e) => setLocal((prev) => ({ ...prev, model: e.target.value }))}
-                    placeholder="Or type custom model ID..."
-                    className="w-full px-3 py-2 text-xs border border-gray-200 rounded-lg focus:outline-none focus:border-[#217346] focus:ring-1 focus:ring-[#217346]"
-                  />
-                  <p className="text-[10px] text-gray-400 mt-1">Type any model ID (e.g., stepfun/step-3.5-flash:free)</p>
-                </div>
+                <input
+                  type="text"
+                  value={local.model}
+                  onChange={(e) => setLocal((prev) => ({ ...prev, model: e.target.value }))}
+                  placeholder="e.g., gpt-4o, claude-sonnet-4-20250514, stepfun/step-3.5-flash:free"
+                  className="w-full px-3 py-2 text-xs border border-gray-200 rounded-lg focus:outline-none focus:border-[#217346] focus:ring-1 focus:ring-[#217346]"
+                />
+                <p className="text-[10px] text-gray-400 mt-1">Type any model ID - fully dynamic (e.g., stepfun/step-3.5-flash:free)</p>
               </div>
 
               {/* API Key for selected provider */}

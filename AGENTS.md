@@ -14,6 +14,9 @@
 <!-- lore:019d6795-50a8-7000-aa5d-40a5574c1f44 -->
 * **apply\_format execution missing border params**: apply\_format fails at THREE points: (1) AI planner doesn't generate border params; (2) App.tsx execution handler passes borders config but omits \`all: true\` property — ExcelAPI.applyFormat checks \`b.all\` at line 253 before applying borders, so silent failure occurs without it; (3) ExcelAPI.applyFormat must receive valid border object. Fix: Add \`all: true\` to borders config in App.tsx line 1438: \`{ all: true, color: ..., style: ..., weight: ... }\`. Also add 'border' to userWantsSelected regex (line 200) so execution uses selected range.
 
+<!-- lore:019d67cd-f8f9-7f53-a0e6-ea9eab78b324 -->
+* **Reasoning agent outputs manual Excel steps instead of agentic actions**: Reasoning agent was generating non-agentic output like "Go to Home tab → click Borders" instead of agentic "I will apply black borders using apply\_format". Fix: Updated REASONING\_PROMPT and reasoning\_task in backend/main.py (lines ~60 and ~1001) to explicitly instruct the AI to describe what actions it WILL take, not manual Excel steps. The prompt now says: "Explain what YOU (the AI assistant) will do, not what the user should do manually in Excel".
+
 ### Pattern
 
 <!-- lore:019d6775-cb41-736a-aac8-2546d972493d -->
