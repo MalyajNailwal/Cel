@@ -74,17 +74,44 @@ Cel is an autonomous Excel agent that interprets intent, plans execution, and de
 
 ## Why Cel Exceeds Native Capabilities
 
-| Feature | Cel | Microsoft Agent |
-|---------|-----|-----------------|
-| **Agent Pipeline** | Reasoning→Planner→Validator (connected) | Single agent |
-| **Formula Validation** | ✅ Checks parentheses, arguments | ❌ |
-| **Error Detection** | ✅ Warns #N/A, #DIV/0! risk | ❌ Produces errors |
-| **Pre-execution Review** | ✅ Shows plan, user confirms | ❌ |
-| **Operation Timeout** | ✅ 2-min max, prevents infinite loops | ❌ |
-| **Memory System** | ✅ Checkpoints, rules, conventions | ❌ |
-| **Recovery** | ✅ Automatic self-correction | Limited |
-| **Streaming** | ✅ Real-time response chunks | ❌ |
-| **Dynamic Model** | ✅ Any model ID (no hardcoding) | Fixed |
+| Feature | Cel | Microsoft Agent | Pi for Excel |
+|---------|-----|-----------------|--------------|
+| **Agent Pipeline** | Reasoning→Planner→Validator (connected) | Single agent | Single agent |
+| **Formula Validation** | ✅ Checks parentheses, arguments | ❌ | ❌ |
+| **Error Detection** | ✅ Warns #N/A, #DIV/0! risk | ❌ Produces errors | ❌ |
+| **Pre-execution Review** | ✅ Shows plan, user confirms | ❌ | ❌ |
+| **Operation Timeout** | ✅ 2-min max, prevents infinite loops | ❌ | ❌ |
+| **Memory System** | ✅ Checkpoints, rules, conventions | ❌ | Partial |
+| **Recovery** | ✅ Automatic self-correction | Limited | Basic |
+| **Streaming** | ✅ Real-time response chunks | ❌ | ❌ |
+| **Dynamic Model** | ✅ Any model ID (no hardcoding) | Fixed | Fixed |
+| **Large Data** | ✅ Backend analysis (100k+ rows) | ❌ | ❌ |
+| **Native Charts** | ✅ Office.js charts | ✅ | ❌ |
+
+---
+
+## Design Philosophy
+
+Cel implements a multi-agent orchestration pattern where each layer operates with bounded autonomy:
+
+**Interpretive Layer** — Decomposes ambiguous requests into structured intent via Reasoning Agent  
+**Synthesis Layer** — Constructs executable plans with dependency awareness via Planner Agent  
+**Validation Layer** — Verifies outcomes against expected state and detects potential errors  
+**Recovery Layer** — Self-corrects when execution diverges from plan via reflection mechanism
+
+The system maintains contextual awareness through:
+- **Checkpoints** — State snapshots before mutations for one-click rollback
+- **Persistent Rules** — User-defined guidance stored and followed by AI
+- **Formatting Conventions** — Currency, date, number preferences applied consistently
+- **Memory Context** — Injected into every API call for personalized responses
+
+**Enterprise Guardrails** distinguish Cel from alternatives:
+- Formula syntax validation prevents common errors before execution
+- Error pattern detection warns about VLOOKUP #N/A, division by zero risks
+- Pre-execution review presents plan to user before irreversible operations
+- Timeout mechanisms prevent infinite loops in complex workflows
+
+Provider abstraction enables seamless model switching — the system routes to any inference endpoint based on configuration, supporting both direct API access and federated gateway patterns.
 
 ---
 
