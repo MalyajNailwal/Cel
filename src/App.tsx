@@ -674,72 +674,67 @@ export default function App() {
           return;
         }
 
-        // Continue with execution...
-          const potentialErrors: string[] = [];
-          for (const step of plan) {
-            if (step.action === 'set_formulas' && step.params?.formulas) {
-              // Check for VLOOKUP/HLOOKUP with #N/A risk
-              for (const row of step.params.formulas) {
-                if (Array.isArray(row)) {
-                  for (const cell of row) {
-                    if (typeof cell === 'string' && cell.toUpperCase().includes('VLOOKUP')) {
-                      // Warn if lookup value might not exist
-                      potentialErrors.push(`VLOOKUP in ${step.params.address} may return #N/A if lookup value not found - consider wrapping in IFERROR`);
-                    }
-                    if (typeof cell === 'string' && cell.toUpperCase().includes('/')) {
-                      // Check for division
-                      const parts = cell.split('/');
-                      if (parts.length > 1 && parts[1].match(/[A-Z]+\d+|SUM\(|COUNT\(/i)) {
-                        potentialErrors.push(`Division in ${step.params.address} may return #DIV/0! if denominator is zero - consider IFERROR`);
-                      }
+        // Error Detection: Check for potential Excel errors before execution
+        const potentialErrors: string[] = [];
+        for (const step of plan) {
+          if (step.action === 'set_formulas' && step.params?.formulas) {
+            for (const row of step.params.formulas) {
+              if (Array.isArray(row)) {
+                for (const cell of row) {
+                  if (typeof cell === 'string' && cell.toUpperCase().includes('VLOOKUP')) {
+                    potentialErrors.push(`VLOOKUP in ${step.params.address} may return #N/A if lookup value not found - consider wrapping in IFERROR`);
+                  }
+                  if (typeof cell === 'string' && cell.toUpperCase().includes('/')) {
+                    const parts = cell.split('/');
+                    if (parts.length > 1 && parts[1].match(/[A-Z]+\d+|SUM\(|COUNT\(/i)) {
+                      potentialErrors.push(`Division in ${step.params.address} may return #DIV/0! if denominator is zero - consider IFERROR`);
                     }
                   }
                 }
               }
             }
-            if (step.action === 'set_values' && step.params?.values) {
-              // Check for empty cells in data
-              let emptyCells = 0;
-              for (const row of step.params.values) {
-                if (Array.isArray(row)) {
-                  for (const cell of row) {
-                    if (cell === '' || cell === null || cell === undefined) emptyCells++;
-                  }
-                }
-              }
-              if (emptyCells > 0 && step.params.values.length > 1) {
-                potentialErrors.push(`Data in ${step.params.address} has ${emptyCells} empty cells - may cause calculation errors`);
-              }
-              // Check for mixed types in columns
-              for (let col = 0; col < (step.params.values[0]?.length || 0); col++) {
-                let numCount = 0, textCount = 0;
-                for (let row = 1; row < Math.min(step.params.values.length, 10); row++) {
-                  const cell = step.params.values[row]?.[col];
-                  if (typeof cell === 'number') numCount++;
-                  else if (typeof cell === 'string' && cell !== '') textCount++;
-                }
-                if (numCount > 0 && textCount > 0) {
-                  potentialErrors.push(`Column ${col + 1} in ${step.params.address} has mixed text/numbers - may cause calculation issues`);
+          }
+          if (step.action === 'set_values' && step.params?.values) {
+            let emptyCells = 0;
+            for (const row of step.params.values) {
+              if (Array.isArray(row)) {
+                for (const cell of row) {
+                  if (cell === '' || cell === null || cell === undefined) emptyCells++;
                 }
               }
             }
-          }
-          if (potentialErrors.length > 0) {
-            const userConfirmed = window.confirm(
-              `Potential issues detected:\n${potentialErrors.slice(0, 3).join('\n')}\n\nContinue anyway?`
-            );
-            if (!userConfirmed) {
-              setMessages((prev) => [...prev, {
-                id: `ai-${Date.now()}`,
-                role: 'assistant',
-                content: 'Operation cancelled due to potential errors.',
-              }]);
-              setIsProcessing(false);
-              setProcessingPhase('idle');
-              return;
+            if (emptyCells > 0 && step.params.values.length > 1) {
+              potentialErrors.push(`Data in ${step.params.address} has ${emptyCells} empty cells - may cause calculation errors`);
             }
-            validationErrors.push(...potentialErrors.map(e => `Warning: ${e}`));
+            for (let col = 0; col < (step.params.values[0]?.length || 0); col++) {
+              let numCount = 0, textCount = 0;
+              for (let row = 1; row < Math.min(step.params.values.length, 10); row++) {
+                const cell = step.params.values[row]?.[col];
+                if (typeof cell === 'number') numCount++;
+                else if (typeof cell === 'string' && cell !== '') textCount++;
+              }
+              if (numCount > 0 && textCount > 0) {
+                potentialErrors.push(`Column ${col + 1} in ${step.params.address} has mixed text/numbers - may cause calculation issues`);
+              }
+            }
           }
+        }
+        if (potentialErrors.length > 0) {
+          const userConfirmed = window.confirm(
+            `Potential issues detected:\n${potentialErrors.slice(0, 3).join('\n')}\n\nContinue anyway?`
+          );
+          if (!userConfirmed) {
+            setMessages((prev) => [...prev, {
+              id: `ai-${Date.now()}`,
+              role: 'assistant',
+              content: 'Operation cancelled due to potential errors.',
+            }]);
+            setIsProcessing(false);
+            setProcessingPhase('idle');
+            return;
+          }
+          validationErrors.push(...potentialErrors.map(e => `Warning: ${e}`));
+        }
 
         setProcessingPhase('executing');
         const executionResults: { action: string; success: boolean; output: string }[] = [];
