@@ -26,7 +26,7 @@ app.add_middleware(
 class ChatRequest(BaseModel):
     message: str
     provider: str = "openai"
-    model: str = "gpt-4o"
+    model: str = ""
     api_key: str
     workbook_context: Optional[str] = None
     selected_range: Optional[str] = None
@@ -38,7 +38,7 @@ class ExecuteRequest(BaseModel):
     message: str
     plan: list = []
     provider: str = "openai"
-    model: str = "gpt-4o"
+    model: str = ""
     api_key: str
     results: list
 
@@ -47,7 +47,7 @@ class AnalyzeRequest(BaseModel):
     data: List[List[Any]]
     question: str
     provider: str = "openai"
-    model: str = "gpt-4o"
+    model: str = ""
     api_key: str
     headers: Optional[List[str]] = None
 
@@ -1223,7 +1223,7 @@ class ReflectRequest(BaseModel):
     plan: list
     results: list
     provider: str = "openai"
-    model: str = "gpt-4o"
+    model: str = ""
     api_key: str
 
 

@@ -62,7 +62,7 @@ export default function App() {
       const saved = localStorage.getItem('excel-ai-settings');
       if (saved) return JSON.parse(saved);
     } catch {}
-    return { provider: 'openai' as const, model: 'gpt-4o', openaiKey: '', anthropicKey: '', googleKey: '' };
+    return { provider: 'openai' as const, model: '', openaiKey: '', anthropicKey: '', googleKey: '' };
   });
 
   const messagesEndRef = useRef<HTMLDivElement>(null);

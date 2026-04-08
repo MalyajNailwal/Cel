@@ -110,7 +110,7 @@ const providerConfig: Record<AIProvider, { name: string; icon: React.ReactNode; 
 
 const defaultSettings: Settings = {
   provider: 'openai',
-  model: 'gpt-4o',
+  model: '',
   openaiKey: '',
   anthropicKey: '',
   googleKey: '',
