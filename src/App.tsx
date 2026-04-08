@@ -1655,7 +1655,18 @@ async function getSelectedRangeData(): Promise<string | null> {
         const sheet = range.worksheet;
         sheet.load('name');
         await context.sync();
-        const result = JSON.stringify({ address: range.address, sheetName: sheet.name, rowCount: range.rowCount, columnCount: range.columnCount, values: range.values });
+        
+        // Extract headers from first row
+        const values = range.values;
+        let headers: string[] = [];
+        if (values && values.length > 0 && values[0]) {
+          for (let i = 0; i < values[0].length; i++) {
+            const header = values[0][i];
+            headers.push(header ? String(header).trim() : `Column ${i + 1}`);
+          }
+        }
+        
+        const result = JSON.stringify({ address: range.address, sheetName: sheet.name, rowCount: range.rowCount, columnCount: range.columnCount, values: range.values, headers: headers });
         console.log('[RANGE] getSelectedRangeData returning:', result.slice(0, 200));
         resolve(result);
       }).catch(() => resolve(null));

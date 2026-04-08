@@ -123,6 +123,10 @@ TASK_DESCRIPTION = """Create a JSON plan for this Excel request: {message}
 
 {context_info}
 {selected_info}
+
+COLUMN HEADERS (use these for charts!):
+{headers_context}
+
 {memory_info}
 
 Reasoning analysis:
@@ -978,6 +982,33 @@ async def chat(req: ChatRequest):
 
         model = setup_env(req.provider, req.model, req.api_key)
 
+        # Extract headers and column info from selected_range for intelligent context
+        headers_context = ""
+        if req.selected_range:
+            try:
+                import json
+
+                # Handle both string (old) and object (new) formats
+                sr = req.selected_range
+                if isinstance(sr, str):
+                    try:
+                        sr = json.loads(sr)
+                    except:
+                        sr = None
+
+                if sr and isinstance(sr, dict):
+                    values = sr.get("values", [])
+                    sheet_name = sr.get("sheetName", "Sheet")
+                    address = sr.get("address", "")
+
+                    if values and len(values) > 0:
+                        headers = values[0] if values[0] else []
+                        header_names = [h for h in headers if h]
+                        if header_names:
+                            headers_context = f"Sheet '{sheet_name}' columns ({len(header_names)}): {', '.join(header_names)}\nData range: {address}"
+            except Exception as e:
+                pass  # Keep silent if extraction fails
+
         context_info = (
             f"Workbook context: {req.workbook_context}" if req.workbook_context else ""
         )
@@ -1062,6 +1093,7 @@ No asterisks or markdown.""",
                     message=req.message,
                     context_info=context_info,
                     selected_info=selected_info,
+                    headers_context=headers_context,
                     memory_info=memory_info,
                     reasoning_output=reasoning
                     if reasoning
