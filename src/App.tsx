@@ -132,7 +132,13 @@ export default function App() {
         const effectiveModel = settings.model;
 
         setProcessingPhase('planning');
-        const planResponse = await fetch('/api/chat', {
+        
+        // Create placeholder messages for streaming
+        let plan: any[] = [];
+        let reasoning = '';
+        let responseContent = '';
+        
+        const response = await fetch('/api/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -147,37 +153,77 @@ export default function App() {
           }),
         });
 
-        if (!planResponse.ok) {
-          const text = await planResponse.text();
-          throw new Error(`Backend error: ${planResponse.status} - ${text}`);
+        if (!response.ok) {
+          const text = await response.text();
+          throw new Error(`Backend error: ${response.status} - ${text}`);
         }
 
-        const planData = await planResponse.json();
-        const plan = planData.plan || [];
-        const reasoning = planData.reasoning;
+        // Handle streaming response
+        const reader = response.body?.getReader();
+        const decoder = new TextDecoder();
         
-        // Show reasoning as a prominent thinking message first
-        if (reasoningEnabled && reasoning) {
-          setProcessingPhase('reasoning');
-          
-          // Clean and format reasoning nicely
-          const cleanReasoning = reasoning
-            .replace(/\*/g, '')
-            .replace(/^\d+\.\s*/gm, '')  // Remove numbered list
-            .replace(/^-\s*/gm, '')      // Remove bullet points
-            .replace(/^•\s*/gm, '')      // Remove bullet symbols
-            .replace(/\n{2,}/g, '\n')    // Clean up extra newlines
-            .trim();
-          
-          const reasoningMsg: ExtendedMessage = {
-            id: `reasoning-${Date.now()}`,
-            role: 'assistant',
-            content: cleanReasoning,
-            isReasoning: true,
-          };
-          setMessages((prev) => [...prev, reasoningMsg]);
-          setTimeout(scrollToBottom, 100);
+        if (!reader) {
+          throw new Error('No response body');
         }
+
+        let buffer = '';
+        let reasoningMessageId: string | null = null;
+        
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+          
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              try {
+                const data = JSON.parse(line.slice(6));
+                
+                if (data.type === 'reasoning' && data.content) {
+                  setProcessingPhase('reasoning');
+                  reasoning = data.content;
+                  
+                  const cleanReasoning = reasoning
+                    .replace(/\*/g, '')
+                    .replace(/^\d+\.\s*/gm, '')
+                    .replace(/^-\s*/gm, '')
+                    .replace(/^•\s*/gm, '')
+                    .replace(/\n{2,}/g, '\n')
+                    .trim();
+                  
+                  if (!reasoningMessageId) {
+                    reasoningMessageId = `reasoning-${Date.now()}`;
+                    const reasoningMsg: ExtendedMessage = {
+                      id: reasoningMessageId,
+                      role: 'assistant',
+                      content: cleanReasoning,
+                      isReasoning: true,
+                    };
+                    setMessages((prev) => [...prev, reasoningMsg]);
+                  } else {
+                    setMessages((prev) => prev.map(m => 
+                      m.id === reasoningMessageId ? { ...m, content: cleanReasoning } : m
+                    ));
+                  }
+                  setTimeout(scrollToBottom, 100);
+                }
+                
+                if (data.type === 'plan' && data.content !== undefined) {
+                  plan = data.plan || [];
+                  responseContent = data.content;
+                  setTimeout(scrollToBottom, 100);
+                }
+              } catch {}
+            }
+          }
+        }
+
+        // Get final plan from the last message
+        const lastMsg = messages[messages.length - 1];
+        plan = plan.length > 0 ? plan : [];
         
         const { validSteps, validationErrors } = validatePlan(plan, userMessage);
 
@@ -1247,7 +1293,7 @@ export default function App() {
           }),
         });
 
-        let finalContent = planData.content;
+        let finalContent = responseContent;
         if (validationResponse.ok) {
           const validationData = await validationResponse.json();
           finalContent = validationData.content;

@@ -1,4 +1,7 @@
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import StreamingResponse
+import json
+import asyncio
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -1040,55 +1043,60 @@ No asterisks or markdown.""",
                 if hasattr(reasoning_result, "raw")
                 else str(reasoning_result)
             )
-            # Clean up reasoning
             reasoning = reasoning.replace("*", "").strip()
 
-        # Step 2: Planner Agent - creates the execution plan
-        planner = Agent(
-            role="Excel Task Planner",
-            goal="Create a precise, step-by-step JSON plan for Excel operations",
-            backstory=SYSTEM_PROMPT,
-            verbose=False,
-            allow_delegation=False,
-            llm=model,
-        )
+        async def generate():
+            yield f"data: {json.dumps({'type': 'reasoning', 'content': reasoning})}\n\n"
 
-        plan_task = Task(
-            description=TASK_DESCRIPTION.format(
-                message=req.message,
-                context_info=context_info,
-                selected_info=selected_info,
-                memory_info=memory_info,
-                reasoning_output=reasoning if reasoning else "No reasoning available",
-            ),
-            expected_output="A JSON object with 'plan' array and 'response' string.",
-            agent=planner,
-        )
+            planner = Agent(
+                role="Excel Task Planner",
+                goal="Create a precise, step-by-step JSON plan for Excel operations",
+                backstory=SYSTEM_PROMPT,
+                verbose=False,
+                allow_delegation=False,
+                llm=model,
+            )
 
-        crew = Crew(
-            agents=[planner],
-            tasks=[plan_task],
-            process=Process.sequential,
-            verbose=False,
-        )
+            plan_task = Task(
+                description=TASK_DESCRIPTION.format(
+                    message=req.message,
+                    context_info=context_info,
+                    selected_info=selected_info,
+                    memory_info=memory_info,
+                    reasoning_output=reasoning
+                    if reasoning
+                    else "No reasoning available",
+                ),
+                expected_output="A JSON object with 'plan' array and 'response' string.",
+                agent=planner,
+            )
 
-        result = crew.kickoff()
-        output = str(result.raw) if hasattr(result, "raw") else str(result)
+            crew = Crew(
+                agents=[planner],
+                tasks=[plan_task],
+                process=Process.sequential,
+                verbose=False,
+            )
 
-        plan = []
-        response_text = output
+            result = crew.kickoff()
+            output = str(result.raw) if hasattr(result, "raw") else str(result)
 
-        try:
-            json_start = output.find("{")
-            json_end = output.rfind("}") + 1
-            if json_start >= 0 and json_end > json_start:
-                parsed = json.loads(output[json_start:json_end])
-                plan = parsed.get("plan", [])
-                response_text = parsed.get("response", output)
-        except:
+            plan = []
             response_text = output
 
-        return ChatResponse(content=response_text, plan=plan, reasoning=reasoning)
+            try:
+                json_start = output.find("{")
+                json_end = output.rfind("}") + 1
+                if json_start >= 0 and json_end > json_start:
+                    parsed = json.loads(output[json_start:json_end])
+                    plan = parsed.get("plan", [])
+                    response_text = parsed.get("response", output)
+            except:
+                response_text = output
+
+            yield f"data: {json.dumps({'type': 'plan', 'plan': plan, 'content': response_text})}\n\n"
+
+        return StreamingResponse(generate(), media_type="text/event-stream")
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

@@ -6,6 +6,9 @@
 <!-- lore:019d6743-3189-7a6b-8909-7340f5976d0b -->
 * **Cel being positioned as SaaS product**: User views Cel through a SaaS lens, not just a personal tool. This affects architectural decisions: needs user auth, multi-tenant support, cloud storage, and billing eventually. Current localStorage approach is sufficient for now, but migration path to Convex or Supabase should be planned. Project already has Supabase available — prefer it over adding Convex unless Convex offers clear advantages for the specific use case.
 
+<!-- lore:019d6bb6-491c-7cc9-a44a-bd4796e53ce4 -->
+* **Model defaults removed - fully dynamic model selection**: Model is now fully dynamic - no hardcoded defaults. All Pydantic request classes in backend/main.py (ChatRequest, ExecuteRequest, AnalyzeRequest, ReflectRequest) use \`model: str = ""\` instead of \`model: str = "gpt-4o"\`. Same change in frontend SettingsPanel.tsx and App.tsx. This forces clients to explicitly provide model ID - any model works (gpt-4o, claude-sonnet, gemini-pro, custom OpenRouter models). Fallback logic was removed since frontend always sends model from settings.
+
 <!-- lore:019d6775-cb40-76de-a459-106c58501ab8 -->
 * **Pi for Excel as reference architecture**: Pi for Excel (tmustier/pi-for-excel, 290 stars) serves as the primary reference architecture for Cel's feature roadmap. Key patterns to adopt: (1) Recovery checkpoints — snapshot cell values before mutations for one-click undo; (2) Persistent rules — user/workbook-level guidance stored and followed by AI; (3) Formatting conventions — currency, date, number preferences applied consistently; (4) Session management — multiple conversations per workbook with auto-save/restore; (5) Context compaction — summarize old messages when context gets long. Cel's advantages over Pi: multi-agent planning (Reasoning→Planning→Execution→Validation), backend large-data analysis, native chart creation.
 
