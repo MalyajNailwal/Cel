@@ -366,27 +366,7 @@ export default function App() {
                   let chartsCreated = 0;
                   let chartDesc = '';
 
-                  // Check if user mentioned columns that aren't in the selected range
-                  // If so, fetch full sheet data
                   const userMsg = userMessage.toLowerCase();
-                  const allHeaders = headers.map((h: string) => h.toLowerCase());
-                  const mentionedHeaders = allHeaders.filter((h: string) => {
-                    const words = h.split(/\s+/);
-                    return words.some((w: string) => userMsg.includes(w));
-                  });
-                  
-                  // If user mentioned columns not in selection, fetch full sheet
-                  if (mentionedHeaders.length > 0 && headers.length < 5) {
-                    try {
-                      const fullData = await ExcelAPI.getSheetData(sheetName);
-                      if (fullData && fullData.values && fullData.values.length > 0) {
-                        headers = fullData.values[0] || [];
-                        rows = fullData.values.slice(1);
-                        const fullAddr = fullData.address;
-                        if (fullAddr) address = fullAddr;
-                      }
-                    } catch {}
-                  }
 
                   const addrParts = address.split('!');
                   const rangePart = addrParts.length > 1 ? addrParts[1] : addrParts[0];
@@ -394,14 +374,29 @@ export default function App() {
                   const startCell = rangeCells[0];
                   const endCell = rangeCells.length > 1 ? rangeCells[1] : rangeCells[0];
                   const startColMatch = startCell.match(/^([A-Z]+)/);
-                  const endColMatch = endCell.match(/^([A-Z]+)/);
-                  const startColIdx = startColMatch ? startColMatch[1].charCodeAt(0) - 65 : 0;
-                  const endColIdx = endColMatch ? endColMatch[1].charCodeAt(0) - 65 : startColIdx;
+                  const startColLabel = startColMatch ? startColMatch[1] : 'A';
+                  const colLabelToIndex = (label: string): number => {
+                    return label.toUpperCase().split('').reduce((acc, ch) => acc * 26 + (ch.charCodeAt(0) - 64), 0) - 1;
+                  };
+                  const indexToColLabel = (idx: number): string => {
+                    let n = idx + 1;
+                    let out = '';
+                    while (n > 0) {
+                      const rem = (n - 1) % 26;
+                      out = String.fromCharCode(65 + rem) + out;
+                      n = Math.floor((n - 1) / 26);
+                    }
+                    return out;
+                  };
+                  const startColIdx = colLabelToIndex(startColLabel);
                   const numCols = headers.length;
 
-                  // Fully dynamic column detection - analyze actual data values
+                  // Build column profiles from the selected range (dynamic for any table shape).
                   const numericCols: number[] = [];
                   const categoricalCols: number[] = [];
+                  const colScores: number[] = Array(headers.length).fill(0);
+                  const headerNorms = headers.map((h: any) => String(h ?? '').trim().toLowerCase());
+                  const tokenize = (s: string) => s.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
                   
                   for (let i = 0; i < headers.length; i++) {
                     let numCount = 0;
@@ -423,14 +418,103 @@ export default function App() {
                     else categoricalCols.push(i);
                   }
 
-                  // Dynamic user column detection - extract from user's message itself
-                  // Parse "X vs Y", "X and Y", "X vs the Y" patterns
+                  // Dynamic intent extraction: explicit matches > phrase-level mapping > fuzzy token fallback.
                   let userMentionedCols: number[] = [];
                   const userMsgLower = userMessage.toLowerCase();
+                  const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
                   
                   // Extract column names from user message - remove common words
-                  const skipWords = ['bar', 'graph', 'chart', 'pie', 'line', 'make', 'create', 'show', 'display', 'the', 'a', 'an', 'of', 'to', 'for', 'between', 'with', 'on', 'in', 'and', 'vs', 'versus', 'name', 'player'];
+                  const skipWords = ['bar', 'graph', 'chart', 'pie', 'line', 'make', 'create', 'show', 'display', 'the', 'a', 'an', 'of', 'to', 'for', 'between', 'with', 'on', 'in', 'and', 'vs', 'versus', 'column', 'columns'];
                   const userWords = userMsgLower.split(/\s+/).filter(w => !skipWords.includes(w) && w.length > 1);
+                  const mentionedSet = new Set<number>();
+
+                  // Strongest signal: exact header names in the prompt.
+                  // If user says "product and quantity", we should lock onto those columns.
+                  const explicitHeaderSet = new Set<number>();
+                  for (let i = 0; i < headers.length; i++) {
+                    const rawHeader = String(headers[i] ?? '').trim().toLowerCase();
+                    if (!rawHeader) continue;
+                    const exactHeaderRegex = new RegExp(`\\b${escapeRegExp(rawHeader)}\\b`, 'i');
+                    if (exactHeaderRegex.test(userMsgLower)) {
+                      explicitHeaderSet.add(i);
+                      mentionedSet.add(i);
+                      colScores[i] += 5;
+                    }
+                  }
+
+                  // Handle explicit Excel column letters only in explicit column-reference phrases.
+                  // Examples: "column b and d", "b, d columns", "columns aa and ac".
+                  const explicitColumnTokens = new Set<string>();
+                  const forwardPattern = /\bcolumn[s]?\s+([a-z]{1,3}(?:\s*(?:,|and|&)\s*[a-z]{1,3})*)\b/gi;
+                  const reversePattern = /\b([a-z]{1,3}(?:\s*(?:,|and|&)\s*[a-z]{1,3})+)\s+column[s]?\b/gi;
+
+                  const collectColumnTokens = (groupText: string) => {
+                    const tokens = groupText
+                      .split(/\s*(?:,|and|&)\s*/i)
+                      .map((t) => t.trim().toLowerCase())
+                      .filter((t) => /^[a-z]{1,3}$/.test(t));
+                    for (const t of tokens) explicitColumnTokens.add(t);
+                  };
+
+                  let patternMatch: RegExpExecArray | null;
+                  while ((patternMatch = forwardPattern.exec(userMsgLower)) !== null) {
+                    collectColumnTokens(patternMatch[1]);
+                  }
+                  while ((patternMatch = reversePattern.exec(userMsgLower)) !== null) {
+                    collectColumnTokens(patternMatch[1]);
+                  }
+
+                  for (const token of explicitColumnTokens) {
+                    const absoluteIdx = colLabelToIndex(token.toUpperCase());
+                    const relativeIdx = absoluteIdx - startColIdx;
+                    if (relativeIdx >= 0 && relativeIdx < headers.length) {
+                      mentionedSet.add(relativeIdx);
+                      colScores[relativeIdx] += 4;
+                    }
+                  }
+
+                  const phraseMatch = userMsgLower.match(
+                    /(?:for|plot|graph|chart)\s+(.+?)(?:\s+(?:and|vs|versus|by)\s+)(.+?)(?:$|[,.!?])/
+                  );
+                  const requestedTerms: string[] = [];
+                  if (phraseMatch) {
+                    requestedTerms.push(phraseMatch[1].trim(), phraseMatch[2].trim());
+                  }
+
+                  const scoreHeaderMatch = (header: string, term: string): number => {
+                    if (!header || !term) return 0;
+                    const h = header.toLowerCase().trim();
+                    const t = term.toLowerCase().trim();
+                    if (h === t) return 1.0;
+                    if (h.includes(t) || t.includes(h)) return 0.85;
+                    const hTokens = tokenize(h);
+                    const tTokens = tokenize(t);
+                    if (!hTokens.length || !tTokens.length) return 0;
+                    const overlap = hTokens.filter((tok) => tTokens.includes(tok)).length;
+                    if (!overlap) return 0;
+                    return overlap / Math.max(hTokens.length, tTokens.length);
+                  };
+
+                  const resolveBestColForTerm = (term: string): number | null => {
+                    let bestIdx: number | null = null;
+                    let bestScore = 0;
+                    for (let i = 0; i < headerNorms.length; i++) {
+                      const s = scoreHeaderMatch(headerNorms[i], term);
+                      if (s > bestScore) {
+                        bestScore = s;
+                        bestIdx = i;
+                      }
+                    }
+                    return bestScore >= 0.55 ? bestIdx : null;
+                  };
+
+                  for (const term of requestedTerms) {
+                    const idx = resolveBestColForTerm(term);
+                    if (idx !== null) {
+                      mentionedSet.add(idx);
+                      colScores[idx] += 3;
+                    }
+                  }
                   
                   // Match each user word against actual headers
                   for (let i = 0; i < headers.length; i++) {
@@ -439,11 +523,13 @@ export default function App() {
                       // Fuzzy match: header contains word OR word matches part of header
                       if (h.includes(userWord) || userWord.includes(h) || 
                           h.split(/\s+/).some((hw: string) => hw.startsWith(userWord.slice(0, 3)) || userWord.startsWith(hw.slice(0, 3)))) {
-                        userMentionedCols.push(i);
+                        mentionedSet.add(i);
+                        colScores[i] += 1;
                         break;
                       }
                     }
                   }
+                  userMentionedCols = Array.from(mentionedSet).sort((a, b) => colScores[b] - colScores[a]);
 
                   // Dynamic AI-recommended column extraction - match column names from analysis
                   let aiRecommendedCols: number[] = [];
@@ -478,11 +564,63 @@ export default function App() {
                     }
                   }
 
+                  // Backend-authoritative intent resolution (scalable source of truth).
+                  let backendResolvedCols: number[] = [];
+                  let backendChartRequests: { chart_type: string; x_col_index: number; y_col_index: number; x_header?: string; y_header?: string }[] = [];
+                  let backendNeedsClarification = false;
+                  let backendClarificationReason = '';
+                  try {
+                    const intentRes = await fetch('/api/resolve-chart-intent', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        data: selectedData,
+                        question: userMessage,
+                        headers,
+                        start_col_index: startColIdx,
+                      }),
+                    });
+                    if (intentRes.ok) {
+                      const intent = await intentRes.json();
+                      if (Array.isArray(intent.chart_requests)) {
+                        backendChartRequests = intent.chart_requests
+                          .filter((r: any) => typeof r?.x_col_index === 'number' && typeof r?.y_col_index === 'number')
+                          .map((r: any) => ({
+                            chart_type: typeof r?.chart_type === 'string' ? r.chart_type : 'column',
+                            x_col_index: r.x_col_index,
+                            y_col_index: r.y_col_index,
+                            x_header: r.x_header,
+                            y_header: r.y_header,
+                          }));
+                      }
+                      if (typeof intent.x_col_index === 'number' && typeof intent.y_col_index === 'number') {
+                        backendResolvedCols = [intent.x_col_index, intent.y_col_index];
+                      }
+                      backendNeedsClarification =
+                        !!intent.needs_clarification &&
+                        backendResolvedCols.length < 2 &&
+                        backendChartRequests.length === 0;
+                      backendClarificationReason = intent.reason || '';
+                    }
+                  } catch {}
+
+                  if (backendNeedsClarification) {
+                    const aiMsg: ExtendedMessage = {
+                      id: `msg-${Date.now()}`,
+                      role: 'assistant',
+                      content: `${analysisResult.analysis || 'Analysis complete.'}\n\nI need a quick clarification before charting: ${backendClarificationReason || 'Please confirm which two columns to use (for example: "Product and Quantity" or "columns B and D").'}`,
+                    };
+                    setMessages((prev) => [...prev, aiMsg]);
+                    setIsProcessing(false);
+                    setProcessingPhase('idle');
+                    return;
+                  }
+
                   const startRow = startCell.match(/\d+/)?.[0] || '1';
                   const endRow = endCell.match(/(\d+)$/)?.[1] || '100';
 
                   const createChartForColumn = async (colIdx: number, chartType: string, title: string) => {
-                    const colLetter = String.fromCharCode(65 + startColIdx + colIdx);
+                    const colLetter = indexToColLabel(startColIdx + colIdx);
                     const chartRange = `${colLetter}${startRow}:${colLetter}${endRow}`;
                     await ExcelAPI.createChart(chartType, chartRange, sheetName, title);
                     chartsCreated++;
@@ -490,19 +628,57 @@ export default function App() {
                   };
 
                   const createChartWithTwoColumns = async (col1Idx: number, col2Idx: number, chartType: string, title: string) => {
-                    const col1Letter = String.fromCharCode(65 + startColIdx + col1Idx);
-                    const col2Letter = String.fromCharCode(65 + startColIdx + col2Idx);
-                    const chartRange = `${col1Letter}${startRow}:${col2Letter}${endRow}`;
-                    await ExcelAPI.createChart(chartType, chartRange, sheetName, title);
+                    const firstLetter = indexToColLabel(startColIdx + col1Idx);
+                    const secondLetter = indexToColLabel(startColIdx + col2Idx);
+                    const firstRange = `${firstLetter}${startRow}:${firstLetter}${endRow}`;
+                    const secondRange = `${secondLetter}${startRow}:${secondLetter}${endRow}`;
+                    await ExcelAPI.createChartFromTwoColumns(chartType, firstRange, secondRange, sheetName, title);
                     chartsCreated++;
                     chartDesc += `📊 ${chartType} chart: ${title}\n`;
                   };
 
-                  // Priority: user mentioned > AI recommended > auto-detect
-                  const effectiveCols = userMentionedCols.length >= 2 ? userMentionedCols : 
-                                       aiRecommendedCols.length >= 2 ? aiRecommendedCols : [];
+                  if (backendChartRequests.length > 0) {
+                    for (const req of backendChartRequests) {
+                      const xIdx = req.x_col_index;
+                      const yIdx = req.y_col_index;
+                      if (xIdx < 0 || yIdx < 0 || xIdx >= headers.length || yIdx >= headers.length || xIdx === yIdx) continue;
+                      const chartType = req.chart_type || (isPieRequest ? 'pie' : isLineRequest ? 'line' : 'column');
+                      const xHeader = req.x_header || headers[xIdx];
+                      const yHeader = req.y_header || headers[yIdx];
+                      const title =
+                        chartType === 'line'
+                          ? `${yHeader} Trend by ${xHeader}`
+                          : `${yHeader} by ${xHeader}`;
+                      await createChartWithTwoColumns(xIdx, yIdx, chartType, title);
+                    }
+                  }
 
-                  if (effectiveCols.length >= 2) {
+                  // Priority contract:
+                  // 1) explicit header mentions, 2) high-confidence user intent mapping, 3) AI fallback.
+                  const explicitHeaderCols = Array.from(explicitHeaderSet);
+                  const confidentUserCols = userMentionedCols.filter((c) => colScores[c] >= 3);
+                  const effectiveCols =
+                    backendResolvedCols.length >= 2 ? backendResolvedCols :
+                    explicitHeaderCols.length >= 2 ? explicitHeaderCols :
+                    confidentUserCols.length >= 2 ? confidentUserCols :
+                    userMentionedCols.length >= 2 ? userMentionedCols :
+                    aiRecommendedCols.length >= 2 ? aiRecommendedCols : [];
+
+                  // If user clearly asked for two fields but we couldn't resolve both confidently,
+                  // ask for clarification instead of guessing wrong columns.
+                  if (requestedTerms.length >= 2 && effectiveCols.length < 2) {
+                    const aiMsg: ExtendedMessage = {
+                      id: `msg-${Date.now()}`,
+                      role: 'assistant',
+                      content: `I could not confidently map both columns from "${requestedTerms[0]}" and "${requestedTerms[1]}". Please confirm the two columns (for example: "Product and Quantity" or "columns B and D").`,
+                    };
+                    setMessages((prev) => [...prev, aiMsg]);
+                    setIsProcessing(false);
+                    setProcessingPhase('idle');
+                    return;
+                  }
+
+                  if (chartsCreated === 0 && effectiveCols.length >= 2) {
                     const catCol = effectiveCols.find(c => categoricalCols.includes(c)) ?? effectiveCols[0];
                     const numCol = effectiveCols.find(c => numericCols.includes(c)) ?? effectiveCols[1];
                     if (isPieRequest) {
@@ -514,7 +690,7 @@ export default function App() {
                     } else {
                       await createChartWithTwoColumns(catCol, numCol, 'column', `${headers[numCol]} by ${headers[catCol]}`);
                     }
-                  } else if (isPieRequest) {
+                  } else if (chartsCreated === 0 && isPieRequest) {
                     if (categoricalCols.length > 0 && numericCols.length > 0) {
                       await createChartWithTwoColumns(categoricalCols[0], numericCols[0], 'pie', `${headers[categoricalCols[0]]} Distribution`);
                     } else if (categoricalCols.length > 0 && numCols >= 2) {
@@ -524,7 +700,7 @@ export default function App() {
                     } else {
                       await createChartForColumn(0, 'pie', `${headers[0]} Distribution`);
                     }
-                  } else if (isBarRequest) {
+                  } else if (chartsCreated === 0 && isBarRequest) {
                     if (numericCols.length > 0 && categoricalCols.length > 0) {
                       await createChartWithTwoColumns(categoricalCols[0], numericCols[0], 'column', `${headers[numericCols[0]]} by ${headers[categoricalCols[0]]}`);
                     } else if (numericCols.length > 0) {
@@ -534,7 +710,7 @@ export default function App() {
                     } else {
                       await createChartForColumn(0, 'column', `${headers[0]} Distribution`);
                     }
-                  } else if (isLineRequest) {
+                  } else if (chartsCreated === 0 && isLineRequest) {
                     if (numericCols.length > 0 && categoricalCols.length > 0) {
                       await createChartWithTwoColumns(categoricalCols[0], numericCols[0], 'line', `${headers[numericCols[0]]} Trend`);
                     } else if (numericCols.length > 0 && numCols >= 2) {
@@ -546,7 +722,7 @@ export default function App() {
                     } else {
                       await createChartForColumn(0, 'line', `${headers[0]} Trend`);
                     }
-                  } else {
+                  } else if (chartsCreated === 0) {
                     if (numericCols.length > 0 && categoricalCols.length > 0) {
                       await createChartWithTwoColumns(categoricalCols[0], numericCols[0], 'column', `${headers[numericCols[0]]} by ${headers[categoricalCols[0]]}`);
                     } else if (numericCols.length > 0) {

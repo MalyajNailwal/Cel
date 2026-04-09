@@ -507,7 +507,7 @@ export async function createChart(
     const excelChartType = chartTypeMap[chartType] || Excel.ChartType.columnClustered;
 
     try {
-      const chart = sheet.charts.add(excelChartType, sourceRange, 'Auto');
+      const chart = sheet.charts.add(excelChartType, sourceRange, 'Columns');
 
       if (title) {
         chart.title.text = title;
@@ -538,6 +538,209 @@ export async function createChart(
     } catch (chartErr: any) {
       console.error('Chart creation error:', chartErr.message);
       throw new Error(`Chart failed: ${chartErr.message}. Range: ${dataRange}, Type: ${chartType}`);
+    }
+  });
+}
+
+export async function createChartFromTwoColumns(
+  chartType: string,
+  categoryRange: string,
+  valueRange: string,
+  sheetName?: string,
+  title?: string,
+  position?: { left: number; top: number; width: number; height: number }
+): Promise<string> {
+  return await Excel.run(async (context) => {
+    const indexToColLabel = (idx: number): string => {
+      let n = idx + 1;
+      let out = '';
+      while (n > 0) {
+        const rem = (n - 1) % 26;
+        out = String.fromCharCode(65 + rem) + out;
+        n = Math.floor((n - 1) / 26);
+      }
+      return out;
+    };
+
+    let sheet: Excel.Worksheet;
+
+    try {
+      if (sheetName) {
+        sheet = context.workbook.worksheets.getItem(sheetName);
+      } else {
+        sheet = context.workbook.worksheets.getActiveWorksheet();
+      }
+    } catch (e) {
+      const sheets = context.workbook.worksheets;
+      sheets.load('items');
+      await context.sync();
+      sheet = sheets.items[0];
+    }
+
+    const categorySource = sheet.getRange(categoryRange);
+    const valueSource = sheet.getRange(valueRange);
+    categorySource.load('address, rowCount, columnCount, values');
+    valueSource.load('address, rowCount, columnCount, values');
+    await context.sync();
+
+    if (
+      categorySource.isNullObject ||
+      valueSource.isNullObject ||
+      categorySource.rowCount === 0 ||
+      valueSource.rowCount === 0
+    ) {
+      throw new Error(
+        `Invalid ranges: category=${categoryRange}, value=${valueRange} on sheet ${sheetName || 'active'}`
+      );
+    }
+
+    if (categorySource.rowCount !== valueSource.rowCount) {
+      throw new Error(
+        `Category/value row mismatch: ${categorySource.rowCount} vs ${valueSource.rowCount}`
+      );
+    }
+
+    const chartTypeMap: Record<string, Excel.ChartType> = {
+      column: Excel.ChartType.columnClustered,
+      columnClustered: Excel.ChartType.columnClustered,
+      columnStacked: Excel.ChartType.columnStacked,
+      column100Stacked: Excel.ChartType.columnStacked,
+      bar: Excel.ChartType.barClustered,
+      barClustered: Excel.ChartType.barClustered,
+      barStacked: Excel.ChartType.barStacked,
+      line: Excel.ChartType.lineMarkers,
+      lineStacked: Excel.ChartType.lineStacked,
+      lineMarkers: Excel.ChartType.lineMarkers,
+      lineMarkersStacked: Excel.ChartType.lineMarkersStacked,
+      pie: Excel.ChartType.pie,
+      pie3D: Excel.ChartType.pie,
+      doughnut: Excel.ChartType.doughnut,
+      area: Excel.ChartType.area,
+      areaStacked: Excel.ChartType.areaStacked,
+      scatter: Excel.ChartType.xyscatter,
+      xyScatter: Excel.ChartType.xyscatter,
+      xyScatterSmooth: Excel.ChartType.xyscatterSmooth,
+      xyScatterSmoothNoMarkers: Excel.ChartType.xyscatterSmoothNoMarkers,
+      xyScatterLines: Excel.ChartType.xyscatterLines,
+      xyScatterLinesNoMarkers: Excel.ChartType.xyscatterLinesNoMarkers,
+      radar: Excel.ChartType.radar,
+      radarFilled: Excel.ChartType.radarFilled,
+      radarMarkers: Excel.ChartType.radarMarkers,
+      surface: Excel.ChartType.surface,
+      surface3D: Excel.ChartType.surface,
+      surfaceWireframe: Excel.ChartType.surfaceWireframe,
+      surface3DWireframe: Excel.ChartType.surfaceWireframe,
+      bubble: Excel.ChartType.bubble,
+      bubble3DEffect: Excel.ChartType.bubble3DEffect,
+      stockHLC: Excel.ChartType.stockHLC,
+      stockOHLC: Excel.ChartType.stockOHLC,
+      stockVHLC: Excel.ChartType.stockVHLC,
+      stockVOHLC: Excel.ChartType.stockVOHLC,
+      treemap: Excel.ChartType.treemap,
+      sunburst: Excel.ChartType.sunburst,
+      histogram: Excel.ChartType.histogram,
+      boxwhisker: Excel.ChartType.boxwhisker,
+      waterfall: Excel.ChartType.waterfall,
+      funnel: Excel.ChartType.funnel,
+    };
+
+    const excelChartType = chartTypeMap[chartType] || Excel.ChartType.columnClustered;
+
+    try {
+      // Build the chart from only the value range, then bind category labels explicitly.
+      // This prevents accidental inclusion of middle columns in non-adjacent selections (e.g. B and D).
+      const chart = sheet.charts.add(excelChartType, valueSource, 'Columns');
+      // Office.js chart typings can lag API surface, so use a guarded dynamic call.
+      const chartAny = chart as any;
+      if (typeof chartAny.setCategoryLabels === 'function') {
+        chartAny.setCategoryLabels(categorySource);
+      } else if (chartAny.axes?.categoryAxis && typeof chartAny.axes.categoryAxis.setCategoryNames === 'function') {
+        chartAny.axes.categoryAxis.setCategoryNames(categorySource);
+      }
+
+      if (title) {
+        chart.title.text = title;
+        chart.title.visible = true;
+      }
+
+      if (position) {
+        chart.left = position.left;
+        chart.top = position.top;
+        chart.width = position.width;
+        chart.height = position.height;
+      } else {
+        chart.width = 550;
+        chart.height = 400;
+        chart.left = 400;
+        chart.top = 20;
+      }
+
+      chart.legend.visible = true;
+      chart.legend.position = 'Bottom';
+
+      await context.sync();
+
+      chart.load('name');
+      await context.sync();
+
+      return `Chart "${title || chart.name}" created successfully on sheet "${sheetName || 'active sheet'}" with category "${categoryRange}" and values "${valueRange}"`;
+    } catch (chartErr: any) {
+      console.warn('Direct two-column chart path failed, trying helper-range fallback:', chartErr.message);
+
+      try {
+        // Fallback: materialize category+value into a contiguous helper range on far-right columns.
+        // This is more compatible across Office hosts (especially for pie charts).
+        const usedRange = sheet.getUsedRangeOrNullObject();
+        usedRange.load('columnCount');
+        await context.sync();
+
+        const usedCols = usedRange.isNullObject ? 0 : usedRange.columnCount;
+        const helperStartIdx = Math.min(Math.max(usedCols + 2, 20), 16380); // keep space for 2 cols
+        const helperEndIdx = helperStartIdx + 1;
+        const helperStartCol = indexToColLabel(helperStartIdx);
+        const helperEndCol = indexToColLabel(helperEndIdx);
+        const rowCount = categorySource.rowCount;
+        const helperAddress = `${helperStartCol}1:${helperEndCol}${rowCount}`;
+        const helperRange = sheet.getRange(helperAddress);
+
+        const categoryValues = categorySource.values as (string | number | boolean)[][];
+        const valueValues = valueSource.values as (string | number | boolean)[][];
+        const merged: (string | number | boolean)[][] = [];
+        for (let i = 0; i < rowCount; i++) {
+          merged.push([categoryValues[i]?.[0] ?? '', valueValues[i]?.[0] ?? '']);
+        }
+        helperRange.values = merged;
+
+        const chart = sheet.charts.add(excelChartType, helperRange, 'Columns');
+        if (title) {
+          chart.title.text = title;
+          chart.title.visible = true;
+        }
+        if (position) {
+          chart.left = position.left;
+          chart.top = position.top;
+          chart.width = position.width;
+          chart.height = position.height;
+        } else {
+          chart.width = 550;
+          chart.height = 400;
+          chart.left = 400;
+          chart.top = 20;
+        }
+        chart.legend.visible = true;
+        chart.legend.position = 'Bottom';
+
+        await context.sync();
+        chart.load('name');
+        await context.sync();
+
+        return `Chart "${title || chart.name}" created successfully on sheet "${sheetName || 'active sheet'}" using helper range "${helperAddress}"`;
+      } catch (fallbackErr: any) {
+        console.error('Two-column chart fallback failed:', fallbackErr.message);
+        throw new Error(
+          `Chart failed: ${fallbackErr.message}. Category: ${categoryRange}, Values: ${valueRange}, Type: ${chartType}`
+        );
+      }
     }
   });
 }

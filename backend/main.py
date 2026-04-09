@@ -55,6 +55,13 @@ class AnalyzeRequest(BaseModel):
     headers: Optional[List[str]] = None
 
 
+class ChartIntentRequest(BaseModel):
+    data: List[List[Any]]
+    question: str
+    headers: Optional[List[str]] = None
+    start_col_index: Optional[int] = 0
+
+
 class ChatResponse(BaseModel):
     content: str
     plan: list
@@ -389,6 +396,60 @@ def analyze_distribution(data: List[List[Any]]) -> dict:
         }
 
     return {"distribution": distribution}
+
+
+def _normalize_text(value: Any) -> str:
+    return str(value or "").strip().lower()
+
+
+def _tokenize(value: str) -> List[str]:
+    return [t for t in re.split(r"[^a-z0-9]+", value.lower()) if t]
+
+
+def _score_header_match(header: str, term: str) -> float:
+    h = _normalize_text(header)
+    t = _normalize_text(term)
+    if not h or not t:
+        return 0.0
+    if h == t:
+        return 1.0
+    if h in t or t in h:
+        return 0.85
+    h_tokens = _tokenize(h)
+    t_tokens = _tokenize(t)
+    if not h_tokens or not t_tokens:
+        return 0.0
+    overlap = len([x for x in h_tokens if x in t_tokens])
+    if overlap == 0:
+        return 0.0
+    return overlap / max(len(h_tokens), len(t_tokens))
+
+
+def _resolve_best_header_index(headers: List[str], term: str, threshold: float = 0.55) -> Optional[int]:
+    best_idx = None
+    best_score = 0.0
+    for i, header in enumerate(headers):
+        s = _score_header_match(header, term)
+        if s > best_score:
+            best_score = s
+            best_idx = i
+    return best_idx if best_score >= threshold else None
+
+
+def _is_numeric_column(rows: List[List[Any]], col_idx: int) -> bool:
+    num_count = 0
+    cat_count = 0
+    sample_size = min(20, len(rows))
+    for i in range(sample_size):
+        val = rows[i][col_idx] if col_idx < len(rows[i]) else None
+        if val in (None, ""):
+            continue
+        cleaned = re.sub(r"[^0-9.\-]", "", str(val))
+        if cleaned and re.fullmatch(r"-?\d+(\.\d+)?", cleaned):
+            num_count += 1
+        else:
+            cat_count += 1
+    return num_count > cat_count
 
 
 def compute_large_data_stats(data: List[List[Any]]) -> dict:
@@ -1254,6 +1315,238 @@ At the end, mention which 2 columns would make a good chart (e.g., "Team vs Tota
             "distribution": distribution.get("distribution", {}),
         }
 
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/resolve-chart-intent")
+async def resolve_chart_intent(req: ChartIntentRequest):
+    try:
+        if not req.data or len(req.data) < 2:
+            return {
+                "needs_clarification": True,
+                "reason": "Need at least headers and one data row",
+            }
+
+        headers = req.headers or req.data[0] or []
+        headers = [str(h).strip() if h is not None else "" for h in headers]
+        rows = req.data[1:] if len(req.data) > 1 else []
+        if len(headers) < 2:
+            return {
+                "needs_clarification": True,
+                "reason": "Need at least two columns for charting",
+            }
+
+        raw_message = req.question or ""
+        message = _normalize_text(raw_message)
+        chart_type = "column"
+        if re.search(r"\bpie\s*chart\b|\bpie\b", message):
+            chart_type = "pie"
+        elif re.search(r"\bline\s*chart\b|\btrend\b|\bline\b", message):
+            chart_type = "line"
+        elif re.search(r"\bbar\s*chart\b|\bbar\s*graph\b|\bbar\b", message):
+            chart_type = "column"
+
+        start_col_index = req.start_col_index or 0
+        scores = [0 for _ in headers]
+        picked = set()
+
+        # 1) Exact header mention
+        for i, h in enumerate(headers):
+            if not h:
+                continue
+            if re.search(rf"\b{re.escape(h.lower())}\b", message):
+                scores[i] += 5
+                picked.add(i)
+
+        # 2) Explicit column letter references in "column b and d" style
+        explicit_tokens = set()
+        forward = re.compile(
+            r"\bcolumn[s]?\s+([a-z]{1,3}(?:\s*(?:,|and|&)\s*[a-z]{1,3})*)\b",
+            re.IGNORECASE,
+        )
+        reverse = re.compile(
+            r"\b([a-z]{1,3}(?:\s*(?:,|and|&)\s*[a-z]{1,3})+)\s+column[s]?\b",
+            re.IGNORECASE,
+        )
+
+        def collect_tokens(group_text: str):
+            parts = re.split(r"\s*(?:,|and|&)\s*", group_text.lower())
+            for part in parts:
+                token = part.strip()
+                if re.fullmatch(r"[a-z]{1,3}", token):
+                    explicit_tokens.add(token)
+
+        for m in forward.finditer(message):
+            collect_tokens(m.group(1))
+        for m in reverse.finditer(message):
+            collect_tokens(m.group(1))
+
+        def col_label_to_index(label: str) -> int:
+            n = 0
+            for ch in label.upper():
+                n = n * 26 + (ord(ch) - 64)
+            return n - 1
+
+        for token in explicit_tokens:
+            absolute = col_label_to_index(token)
+            relative = absolute - start_col_index
+            if 0 <= relative < len(headers):
+                scores[relative] += 4
+                picked.add(relative)
+
+        # 3) Phrase-level extraction: "for X and Y", "X vs Y", "X by Y"
+        terms = []
+        phrase = re.search(
+            r"(?:for|plot|graph|chart)\s+(.+?)\s+(?:and|vs|versus|by)\s+(.+?)(?:$|[,.!?])",
+            message,
+        )
+        if phrase:
+            terms.extend([phrase.group(1).strip(), phrase.group(2).strip()])
+        else:
+            pair = re.search(r"(.+?)\s+(?:vs|versus|and|by)\s+(.+?)(?:$|[,.!?])", message)
+            if pair:
+                terms.extend([pair.group(1).strip(), pair.group(2).strip()])
+
+        # Multi-pair extraction for requests like:
+        # "Pie chart: Category + Sales, Region + Sales"
+        # or numbered lines with multiple pairs.
+        multi_pairs: List[List[str]] = []
+        normalized_lines = []
+        for line in raw_message.splitlines():
+            cleaned = re.sub(r"^\s*[\d]+[\)\.\-:]*\s*", "", line.strip())
+            if cleaned:
+                normalized_lines.append(cleaned)
+        if not normalized_lines:
+            normalized_lines = [raw_message]
+
+        for line in normalized_lines:
+            line_l = line.lower()
+            # Explicit plus pairs
+            for m in re.finditer(r"([a-z0-9][a-z0-9 _/-]{0,40})\s*\+\s*([a-z0-9][a-z0-9 _/-]{0,40})", line_l):
+                multi_pairs.append([m.group(1).strip(), m.group(2).strip()])
+            # "x and y / x vs y / x by y" pairs
+            for m in re.finditer(r"([a-z0-9][a-z0-9 _/-]{0,40})\s+(and|vs|versus|by)\s+([a-z0-9][a-z0-9 _/-]{0,40})", line_l):
+                left = m.group(1).strip()
+                right = m.group(3).strip()
+                if left not in {"make", "create", "use", "chart", "pie", "bar", "line"} and right not in {"chart"}:
+                    multi_pairs.append([left, right])
+
+        # Deduplicate and keep high-signal pairs
+        pair_seen = set()
+        cleaned_pairs: List[List[str]] = []
+        noise_terms = {"pie", "bar", "line", "chart", "graph", "plot", "use", "make", "create"}
+        for left, right in multi_pairs:
+            l = left.strip(" -:,.")
+            r = right.strip(" -:,.")
+            if not l or not r:
+                continue
+            if l in noise_terms or r in noise_terms:
+                continue
+            key = (l, r)
+            if key not in pair_seen:
+                pair_seen.add(key)
+                cleaned_pairs.append([l, r])
+
+        for term in terms:
+            idx = _resolve_best_header_index(headers, term, threshold=0.55)
+            if idx is not None:
+                scores[idx] += 3
+                picked.add(idx)
+
+        # 4) Token fallback
+        skip_words = {
+            "bar", "graph", "chart", "pie", "line", "make", "create", "show",
+            "display", "the", "a", "an", "of", "to", "for", "between", "with",
+            "on", "in", "and", "vs", "versus", "column", "columns", "can", "you",
+        }
+        user_tokens = [t for t in _tokenize(message) if len(t) > 1 and t not in skip_words]
+        for i, h in enumerate(headers):
+            hn = _normalize_text(h)
+            h_tokens = _tokenize(hn)
+            for tok in user_tokens:
+                if tok in hn or hn in tok or any(ht.startswith(tok[:3]) or tok.startswith(ht[:3]) for ht in h_tokens if len(ht) >= 3):
+                    scores[i] += 1
+                    picked.add(i)
+                    break
+
+        ranked = sorted(list(picked), key=lambda i: scores[i], reverse=True)
+
+        # If user used a clear pair phrase but we cannot confidently map 2 columns, ask.
+        if len(terms) >= 2 and len(ranked) < 2:
+            return {
+                "needs_clarification": True,
+                "reason": f'Could not confidently map both requested fields from "{terms[0]}" and "{terms[1]}"',
+                "chart_type": chart_type,
+            }
+
+        x_col = None
+        y_col = None
+
+        if len(ranked) >= 2:
+            cand = ranked[:4]
+            numeric = [i for i in cand if _is_numeric_column(rows, i)]
+            categorical = [i for i in cand if i not in numeric]
+            x_col = categorical[0] if categorical else cand[0]
+            y_col = numeric[0] if numeric else (cand[1] if len(cand) > 1 else cand[0])
+            if x_col == y_col and len(cand) > 1:
+                y_col = cand[1]
+
+        confidence = 0.0
+        if x_col is not None and y_col is not None:
+            confidence = min(1.0, min(scores[x_col], scores[y_col]) / 5.0)
+
+        # Resolve multiple requested pairs when present.
+        chart_requests = []
+        if cleaned_pairs:
+            for left, right in cleaned_pairs:
+                left_idx = _resolve_best_header_index(headers, left, threshold=0.55)
+                right_idx = _resolve_best_header_index(headers, right, threshold=0.55)
+                if left_idx is None or right_idx is None or left_idx == right_idx:
+                    continue
+                left_num = _is_numeric_column(rows, left_idx)
+                right_num = _is_numeric_column(rows, right_idx)
+                if left_num and not right_num:
+                    cx, cy = right_idx, left_idx
+                elif right_num and not left_num:
+                    cx, cy = left_idx, right_idx
+                else:
+                    cx, cy = left_idx, right_idx
+                chart_requests.append(
+                    {
+                        "chart_type": chart_type,
+                        "x_col_index": cx,
+                        "y_col_index": cy,
+                        "x_header": headers[cx],
+                        "y_header": headers[cy],
+                        "source_terms": {"left": left, "right": right},
+                    }
+                )
+
+        if not chart_requests and x_col is not None and y_col is not None:
+            chart_requests.append(
+                {
+                    "chart_type": chart_type,
+                    "x_col_index": x_col,
+                    "y_col_index": y_col,
+                    "x_header": headers[x_col],
+                    "y_header": headers[y_col],
+                }
+            )
+
+        return {
+            "needs_clarification": len(chart_requests) == 0,
+            "chart_type": chart_type,
+            "x_col_index": x_col,
+            "y_col_index": y_col,
+            "x_header": headers[x_col] if x_col is not None else None,
+            "y_header": headers[y_col] if y_col is not None else None,
+            "confidence": confidence,
+            "chart_requests": chart_requests,
+            "ranked_candidates": [
+                {"index": i, "header": headers[i], "score": scores[i]} for i in ranked[:6]
+            ],
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
