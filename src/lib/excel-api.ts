@@ -507,7 +507,7 @@ export async function createChart(
     const excelChartType = chartTypeMap[chartType] || Excel.ChartType.columnClustered;
 
     try {
-      const chart = sheet.charts.add(excelChartType, sourceRange, 'Columns');
+      const chart = sheet.charts.add(excelChartType, sourceRange, 'Auto');
 
       if (title) {
         chart.title.text = title;

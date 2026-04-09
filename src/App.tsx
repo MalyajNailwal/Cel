@@ -429,7 +429,7 @@ export default function App() {
                   const userMsgLower = userMessage.toLowerCase();
                   
                   // Extract column names from user message - remove common words
-                  const skipWords = ['bar', 'graph', 'chart', 'pie', 'line', 'make', 'create', 'show', 'display', 'the', 'a', 'an', 'of', 'to', 'for', 'between', 'with', 'on', 'in', 'and', 'vs', 'versus'];
+                  const skipWords = ['bar', 'graph', 'chart', 'pie', 'line', 'make', 'create', 'show', 'display', 'the', 'a', 'an', 'of', 'to', 'for', 'between', 'with', 'on', 'in', 'and', 'vs', 'versus', 'name', 'player'];
                   const userWords = userMsgLower.split(/\s+/).filter(w => !skipWords.includes(w) && w.length > 1);
                   
                   // Match each user word against actual headers
@@ -490,11 +490,9 @@ export default function App() {
                   };
 
                   const createChartWithTwoColumns = async (col1Idx: number, col2Idx: number, chartType: string, title: string) => {
-                    const minCol = startColIdx + Math.min(col1Idx, col2Idx);
-                    const maxCol = startColIdx + Math.max(col1Idx, col2Idx);
-                    const startLetter = String.fromCharCode(65 + minCol);
-                    const endLetter = String.fromCharCode(65 + maxCol);
-                    const chartRange = `${startLetter}${startRow}:${endLetter}${endRow}`;
+                    const col1Letter = String.fromCharCode(65 + startColIdx + col1Idx);
+                    const col2Letter = String.fromCharCode(65 + startColIdx + col2Idx);
+                    const chartRange = `${col1Letter}${startRow}:${col2Letter}${endRow}`;
                     await ExcelAPI.createChart(chartType, chartRange, sheetName, title);
                     chartsCreated++;
                     chartDesc += `📊 ${chartType} chart: ${title}\n`;
