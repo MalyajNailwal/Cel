@@ -357,20 +357,30 @@ const ToolCallDisplay: React.FC<{
 
 export const TypingIndicator: React.FC<{ phase?: string }> = ({ phase = 'thinking' }) => {
   const phaseLabels: Record<string, string> = {
+    understanding: 'Understanding your request...',
+    context: 'Reading selected range and context...',
+    schema: 'Analyzing table schema...',
+    intent: 'Mapping intent to columns...',
     thinking: 'Analyzing...',
     reasoning: 'Thinking...',
     planning: 'Planning...',
     analyzing: 'Analyzing data...',
     executing: 'Working...',
+    verifying: 'Verifying chart mappings...',
     validating: 'Validating...',
   };
 
   const phaseColors: Record<string, string> = {
+    understanding: 'from-violet-400 to-violet-500',
+    context: 'from-indigo-400 to-blue-500',
+    schema: 'from-cyan-400 to-blue-500',
+    intent: 'from-blue-400 to-indigo-500',
     thinking: 'from-violet-400 to-violet-500',
     reasoning: 'from-indigo-400 to-indigo-500',
     planning: 'from-blue-400 to-blue-500',
     analyzing: 'from-cyan-400 to-cyan-500',
     executing: 'from-emerald-400 to-emerald-500',
+    verifying: 'from-amber-400 to-orange-500',
     validating: 'from-amber-400 to-amber-500',
   };
 

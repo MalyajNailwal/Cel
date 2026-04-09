@@ -8,7 +8,20 @@ import type { ChatMessage, AIProvider } from '@/lib/ai-providers';
 import * as ExcelAPI from '@/lib/excel-api';
 import { loadMemory, saveMemory, addMistake, trackOperation, addCheckpoint, getCheckpoints, getMemoryContext } from '@/lib/memory';
 
-type ProcessingPhase = 'idle' | 'thinking' | 'reasoning' | 'planning' | 'analyzing' | 'confirming' | 'executing' | 'validating';
+type ProcessingPhase =
+  | 'idle'
+  | 'understanding'
+  | 'context'
+  | 'schema'
+  | 'intent'
+  | 'thinking'
+  | 'reasoning'
+  | 'planning'
+  | 'analyzing'
+  | 'confirming'
+  | 'executing'
+  | 'verifying'
+  | 'validating';
 
 interface Settings {
   provider: AIProvider;
@@ -41,12 +54,17 @@ interface SelectedRangeInfo {
 
 const PHASE_CONFIG: Record<ProcessingPhase, { label: string; color: string; accent: string }> = {
   idle: { label: '', color: '', accent: '' },
+  understanding: { label: 'Understanding your request...', color: 'text-violet-600', accent: 'from-violet-500 to-purple-600' },
+  context: { label: 'Reading selected range and context...', color: 'text-indigo-600', accent: 'from-indigo-500 to-blue-600' },
+  schema: { label: 'Analyzing table schema...', color: 'text-cyan-600', accent: 'from-cyan-500 to-blue-600' },
+  intent: { label: 'Mapping intent to columns...', color: 'text-blue-600', accent: 'from-blue-500 to-indigo-600' },
   thinking: { label: 'Analyzing...', color: 'text-violet-600', accent: 'from-violet-500 to-purple-600' },
   reasoning: { label: 'Thinking...', color: 'text-indigo-600', accent: 'from-indigo-500 to-purple-600' },
   planning: { label: 'Planning...', color: 'text-blue-600', accent: 'from-blue-500 to-indigo-600' },
   analyzing: { label: 'Analyzing data...', color: 'text-cyan-600', accent: 'from-cyan-500 to-blue-600' },
   confirming: { label: 'Confirm...', color: 'text-orange-600', accent: 'from-orange-500 to-red-600' },
   executing: { label: 'Working...', color: 'text-emerald-600', accent: 'from-emerald-500 to-teal-600' },
+  verifying: { label: 'Verifying chart mappings...', color: 'text-amber-600', accent: 'from-amber-500 to-orange-600' },
   validating: { label: 'Validating...', color: 'text-amber-600', accent: 'from-amber-500 to-orange-600' },
 };
 
@@ -126,16 +144,17 @@ export default function App() {
       const userMsg: ExtendedMessage = { id: `user-${Date.now()}`, role: 'user', content: userMessage };
       setMessages((prev) => [...prev, userMsg]);
       setIsProcessing(true);
-      setProcessingPhase('thinking');
+      setProcessingPhase('understanding');
 
       try {
+        setProcessingPhase('context');
         const workbookContext = await getWorkbookContext();
         const selectedRangeData = await getSelectedRangeData();
 
         // Resource-aware: Use user's model as-is - truly dynamic, works with ANY model
         const effectiveModel = settings.model;
 
-        setProcessingPhase('planning');
+        setProcessingPhase('thinking');
         
         // Create placeholder messages for streaming
         let plan: any[] = [];
@@ -327,7 +346,7 @@ export default function App() {
         const isLineRequest = /line\s*chart|trend/i.test(userMessage);
 
         if ((isAnalysisRequest || isChartRequest) && selectedRangeData) {
-          setProcessingPhase('analyzing');
+          setProcessingPhase('context');
           let selectedData = null;
           try {
             const sr = JSON.parse(selectedRangeData);
@@ -337,26 +356,45 @@ export default function App() {
           } catch {}
 
           if (selectedData) {
-            const isLargeData = selectedData.length > 1000;
-            const endpoint = isLargeData ? '/api/analyze-large' : '/api/analyze';
-            
-            const analyzeResponse = await fetch(endpoint, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                data: selectedData,
-                question: userMessage,
-                provider: settings.provider,
-                model: effectiveModel,
-                api_key: apiKey,
-                headers: selectedData[0] || [],
-              }),
-            });
+            setProcessingPhase('schema');
+            try {
+              await fetch('/api/build-schema', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  data: selectedData,
+                  question: userMessage,
+                  provider: settings.provider,
+                  model: effectiveModel,
+                  api_key: apiKey,
+                  headers: selectedData[0] || [],
+                }),
+              });
+            } catch {}
 
-            if (analyzeResponse.ok) {
-              const analysisResult = await analyzeResponse.json();
+            let analysisResult: any = { analysis: '' };
+            if (isAnalysisRequest) {
+              setProcessingPhase('analyzing');
+              const isLargeData = selectedData.length > 1000;
+              const endpoint = isLargeData ? '/api/analyze-large' : '/api/analyze';
+              const analyzeResponse = await fetch(endpoint, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  data: selectedData,
+                  question: userMessage,
+                  provider: settings.provider,
+                  model: effectiveModel,
+                  api_key: apiKey,
+                  headers: selectedData[0] || [],
+                }),
+              });
+              if (analyzeResponse.ok) {
+                analysisResult = await analyzeResponse.json();
+              }
+            }
 
-                  if (isChartRequest && selectedRangeData) {
+            if (isChartRequest && selectedRangeData) {
                 try {
                   const sr = JSON.parse(selectedRangeData);
                   let headers = selectedData[0] || [];
@@ -565,10 +603,12 @@ export default function App() {
                   }
 
                   // Backend-authoritative intent resolution (scalable source of truth).
+                  setProcessingPhase('intent');
                   let backendResolvedCols: number[] = [];
                   let backendChartRequests: { chart_type: string; x_col_index: number; y_col_index: number; x_header?: string; y_header?: string }[] = [];
                   let backendNeedsClarification = false;
                   let backendClarificationReason = '';
+                  let backendClarificationQuestion = '';
                   try {
                     const intentRes = await fetch('/api/resolve-chart-intent', {
                       method: 'POST',
@@ -601,6 +641,7 @@ export default function App() {
                         backendResolvedCols.length < 2 &&
                         backendChartRequests.length === 0;
                       backendClarificationReason = intent.reason || '';
+                      backendClarificationQuestion = intent.clarification_question || '';
                     }
                   } catch {}
 
@@ -608,7 +649,7 @@ export default function App() {
                     const aiMsg: ExtendedMessage = {
                       id: `msg-${Date.now()}`,
                       role: 'assistant',
-                      content: `${analysisResult.analysis || 'Analysis complete.'}\n\nI need a quick clarification before charting: ${backendClarificationReason || 'Please confirm which two columns to use (for example: "Product and Quantity" or "columns B and D").'}`,
+                      content: `${analysisResult.analysis || 'Analysis complete.'}\n\nI need a quick clarification before charting: ${backendClarificationQuestion || backendClarificationReason || 'Please confirm which two columns to use (for example: "Product and Quantity" or "columns B and D").'}`,
                     };
                     setMessages((prev) => [...prev, aiMsg]);
                     setIsProcessing(false);
@@ -616,6 +657,7 @@ export default function App() {
                     return;
                   }
 
+                  setProcessingPhase('planning');
                   const startRow = startCell.match(/\d+/)?.[0] || '1';
                   const endRow = endCell.match(/(\d+)$/)?.[1] || '100';
 
@@ -637,6 +679,9 @@ export default function App() {
                     chartDesc += `📊 ${chartType} chart: ${title}\n`;
                   };
 
+                  const createdChartMappings: { x_header: string; y_header: string; chart_type: string }[] = [];
+                  setProcessingPhase('executing');
+
                   if (backendChartRequests.length > 0) {
                     for (const req of backendChartRequests) {
                       const xIdx = req.x_col_index;
@@ -650,6 +695,7 @@ export default function App() {
                           ? `${yHeader} Trend by ${xHeader}`
                           : `${yHeader} by ${xHeader}`;
                       await createChartWithTwoColumns(xIdx, yIdx, chartType, title);
+                      createdChartMappings.push({ x_header: String(xHeader), y_header: String(yHeader), chart_type: chartType });
                     }
                   }
 
@@ -683,12 +729,16 @@ export default function App() {
                     const numCol = effectiveCols.find(c => numericCols.includes(c)) ?? effectiveCols[1];
                     if (isPieRequest) {
                       await createChartWithTwoColumns(catCol, numCol, 'pie', `${headers[catCol]} vs ${headers[numCol]}`);
+                      createdChartMappings.push({ x_header: String(headers[catCol]), y_header: String(headers[numCol]), chart_type: 'pie' });
                     } else if (isBarRequest) {
                       await createChartWithTwoColumns(catCol, numCol, 'column', `${headers[numCol]} by ${headers[catCol]}`);
+                      createdChartMappings.push({ x_header: String(headers[catCol]), y_header: String(headers[numCol]), chart_type: 'column' });
                     } else if (isLineRequest) {
                       await createChartWithTwoColumns(catCol, numCol, 'line', `${headers[numCol]} Trend`);
+                      createdChartMappings.push({ x_header: String(headers[catCol]), y_header: String(headers[numCol]), chart_type: 'line' });
                     } else {
                       await createChartWithTwoColumns(catCol, numCol, 'column', `${headers[numCol]} by ${headers[catCol]}`);
+                      createdChartMappings.push({ x_header: String(headers[catCol]), y_header: String(headers[numCol]), chart_type: 'column' });
                     }
                   } else if (chartsCreated === 0 && isPieRequest) {
                     if (categoricalCols.length > 0 && numericCols.length > 0) {
@@ -742,10 +792,39 @@ export default function App() {
                     chartDesc = `📊 Chart created on ${sheetName}`;
                   }
 
+                  const expectedMappings = backendChartRequests.length > 0
+                    ? backendChartRequests.map((r) => ({
+                        x_header: String(r.x_header || headers[r.x_col_index] || ''),
+                        y_header: String(r.y_header || headers[r.y_col_index] || ''),
+                        chart_type: r.chart_type || 'column',
+                      }))
+                    : createdChartMappings;
+                  let verificationNote = '';
+                  if (expectedMappings.length > 0 && createdChartMappings.length > 0) {
+                    setProcessingPhase('verifying');
+                    try {
+                      const verifyRes = await fetch('/api/verify-chart-execution', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                          request_message: userMessage,
+                          expected_charts: expectedMappings,
+                          created_charts: createdChartMappings,
+                        }),
+                      });
+                      if (verifyRes.ok) {
+                        const verify = await verifyRes.json();
+                        verificationNote = verify.ok
+                          ? `\n✅ Verification: ${verify.message}`
+                          : `\n⚠️ Verification: ${verify.message}`;
+                      }
+                    } catch {}
+                  }
+
                   const aiMsg: ExtendedMessage = {
                     id: `msg-${Date.now()}`,
                     role: 'assistant',
-                    content: `${analysisResult.analysis || 'Analysis complete.'}\n\n${chartDesc}`,
+                    content: `${analysisResult.analysis || 'Analysis complete.'}\n\n${chartDesc}${verificationNote}`,
                   };
                   setMessages((prev) => [...prev, aiMsg]);
                   setIsProcessing(false);
@@ -763,7 +842,8 @@ export default function App() {
                   return;
                 }
               }
-              
+
+              if (isAnalysisRequest) {
               const aiMsg: ExtendedMessage = {
                 id: `msg-${Date.now()}`,
                 role: 'assistant',
@@ -1686,12 +1766,28 @@ export default function App() {
             <div
               className={cn('h-full rounded-full transition-all duration-500')}
               style={{
-                width: processingPhase === 'thinking' || processingPhase === 'reasoning' ? '25%' : processingPhase === 'planning' ? '50%' : processingPhase === 'executing' ? '75%' : '95%',
+                width:
+                  processingPhase === 'understanding' ? '12%' :
+                  processingPhase === 'context' ? '24%' :
+                  processingPhase === 'schema' ? '36%' :
+                  processingPhase === 'intent' ? '48%' :
+                  processingPhase === 'planning' ? '60%' :
+                  processingPhase === 'executing' ? '78%' :
+                  processingPhase === 'verifying' || processingPhase === 'validating' ? '92%' :
+                  processingPhase === 'thinking' || processingPhase === 'reasoning' || processingPhase === 'analyzing' ? '30%' :
+                  '95%',
                 background: `linear-gradient(90deg, ${
-                  processingPhase === 'thinking' || processingPhase === 'reasoning' ? '#8b5cf6, #a78bfa' :
-                  processingPhase === 'planning' ? '#3b82f6, #60a5fa' :
-                  processingPhase === 'executing' ? '#10b981, #34d399' :
-                  '#f59e0b, #fbbf24'
+                  processingPhase === 'understanding' || processingPhase === 'thinking' || processingPhase === 'reasoning'
+                    ? '#8b5cf6, #a78bfa'
+                    : processingPhase === 'context'
+                    ? '#6366f1, #60a5fa'
+                    : processingPhase === 'schema' || processingPhase === 'analyzing'
+                    ? '#06b6d4, #3b82f6'
+                    : processingPhase === 'intent' || processingPhase === 'planning'
+                    ? '#3b82f6, #60a5fa'
+                    : processingPhase === 'executing'
+                    ? '#10b981, #34d399'
+                    : '#f59e0b, #fbbf24'
                 })`,
               }}
             />

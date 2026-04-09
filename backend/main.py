@@ -62,6 +62,12 @@ class ChartIntentRequest(BaseModel):
     start_col_index: Optional[int] = 0
 
 
+class VerifyChartExecutionRequest(BaseModel):
+    request_message: str
+    expected_charts: List[dict]
+    created_charts: List[dict]
+
+
 class ChatResponse(BaseModel):
     content: str
     plan: list
@@ -133,6 +139,9 @@ TASK_DESCRIPTION = """Create a JSON plan for this Excel request: {message}
 
 COLUMN HEADERS (use these for charts!):
 {headers_context}
+
+TABLE SCHEMA (deterministic context agent output):
+{schema_context}
 
 {memory_info}
 
@@ -450,6 +459,66 @@ def _is_numeric_column(rows: List[List[Any]], col_idx: int) -> bool:
         else:
             cat_count += 1
     return num_count > cat_count
+
+
+def build_table_schema(data: List[List[Any]]) -> dict:
+    """Deterministic schema/context agent output for planner and intent resolution."""
+    if not data or not data[0]:
+        return {"error": "No data", "columns": []}
+
+    headers = [str(h).strip() if h is not None else "" for h in data[0]]
+    rows = data[1:] if len(data) > 1 else []
+    row_count = len(rows)
+
+    schema_columns = []
+    for i, header in enumerate(headers):
+        values = [r[i] if i < len(r) else None for r in rows]
+        non_empty = [v for v in values if v not in (None, "")]
+        null_count = row_count - len(non_empty)
+        null_pct = (null_count / row_count * 100.0) if row_count > 0 else 0.0
+
+        numeric_hits = 0
+        date_hits = 0
+        text_hits = 0
+        for v in non_empty[:100]:
+            s = str(v).strip()
+            cleaned = re.sub(r"[^0-9.\-]", "", s)
+            if cleaned and re.fullmatch(r"-?\d+(\.\d+)?", cleaned):
+                numeric_hits += 1
+            elif re.fullmatch(r"\d{1,2}[/-]\d{1,2}[/-]\d{2,4}", s) or re.fullmatch(
+                r"\d{4}[/-]\d{1,2}[/-]\d{1,2}", s
+            ):
+                date_hits += 1
+            else:
+                text_hits += 1
+
+        sample_size = max(len(non_empty[:100]), 1)
+        numeric_conf = round(numeric_hits / sample_size, 3)
+        date_conf = round(date_hits / sample_size, 3)
+        if numeric_conf >= 0.6:
+            inferred_type = "number"
+        elif date_conf >= 0.5:
+            inferred_type = "date"
+        else:
+            inferred_type = "text"
+
+        schema_columns.append(
+            {
+                "index": i,
+                "name": header or f"Column {i + 1}",
+                "inferred_type": inferred_type,
+                "numeric_confidence": numeric_conf,
+                "date_confidence": date_conf,
+                "null_pct": round(null_pct, 2),
+                "sample_values": [str(v) for v in non_empty[:3]],
+            }
+        )
+
+    return {
+        "total_rows": row_count,
+        "total_columns": len(headers),
+        "columns": schema_columns,
+    }
 
 
 def compute_large_data_stats(data: List[List[Any]]) -> dict:
@@ -1043,8 +1112,9 @@ async def chat(req: ChatRequest):
 
         model = setup_env(req.provider, req.model, req.api_key)
 
-        # Extract headers and column info from selected_range for intelligent context
+        # Extract headers and schema context from selected_range for intelligent planning
         headers_context = ""
+        schema_context = ""
         if req.selected_range:
             try:
                 import json
@@ -1067,6 +1137,8 @@ async def chat(req: ChatRequest):
                         header_names = [h for h in headers if h]
                         if header_names:
                             headers_context = f"Sheet '{sheet_name}' columns ({len(header_names)}): {', '.join(header_names)}\nData range: {address}"
+                        schema = build_table_schema(values)
+                        schema_context = json.dumps(schema, ensure_ascii=False)
             except Exception as e:
                 pass  # Keep silent if extraction fails
 
@@ -1155,6 +1227,7 @@ No asterisks or markdown.""",
                     context_info=context_info,
                     selected_info=selected_info,
                     headers_context=headers_context,
+                    schema_context=schema_context or "No schema available",
                     memory_info=memory_info,
                     reasoning_output=reasoning
                     if reasoning
@@ -1474,9 +1547,12 @@ async def resolve_chart_intent(req: ChartIntentRequest):
 
         # If user used a clear pair phrase but we cannot confidently map 2 columns, ask.
         if len(terms) >= 2 and len(ranked) < 2:
+            suggestions = [headers[i] for i in ranked[:3]] if ranked else headers[:3]
+            suggestion_text = ", ".join([s for s in suggestions if s]) or "the column names in your table"
             return {
                 "needs_clarification": True,
                 "reason": f'Could not confidently map both requested fields from "{terms[0]}" and "{terms[1]}"',
+                "clarification_question": f'I found close columns: {suggestion_text}. Which exact two columns should I use?',
                 "chart_type": chart_type,
             }
 
@@ -1543,9 +1619,72 @@ async def resolve_chart_intent(req: ChartIntentRequest):
             "y_header": headers[y_col] if y_col is not None else None,
             "confidence": confidence,
             "chart_requests": chart_requests,
+            "clarification_question": (
+                "Please confirm the exact two columns to chart."
+                if len(chart_requests) == 0
+                else ""
+            ),
             "ranked_candidates": [
                 {"index": i, "header": headers[i], "score": scores[i]} for i in ranked[:6]
             ],
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/build-schema")
+async def build_schema_endpoint(req: AnalyzeRequest):
+    try:
+        return {"schema": build_table_schema(req.data)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/verify-chart-execution")
+async def verify_chart_execution(req: VerifyChartExecutionRequest):
+    try:
+        expected = req.expected_charts or []
+        created = req.created_charts or []
+
+        if not expected:
+            return {
+                "ok": False,
+                "status": "needs_review",
+                "message": "No expected chart mapping was provided for verification.",
+            }
+
+        missing = []
+        matched = 0
+        for exp in expected:
+            exp_x = _normalize_text(exp.get("x_header"))
+            exp_y = _normalize_text(exp.get("y_header"))
+            found = False
+            for got in created:
+                got_x = _normalize_text(got.get("x_header"))
+                got_y = _normalize_text(got.get("y_header"))
+                if exp_x and exp_y and got_x == exp_x and got_y == exp_y:
+                    found = True
+                    break
+            if found:
+                matched += 1
+            else:
+                missing.append({"x_header": exp.get("x_header"), "y_header": exp.get("y_header")})
+
+        ok = matched == len(expected)
+        if ok:
+            return {
+                "ok": True,
+                "status": "verified",
+                "message": f"Verified {matched}/{len(expected)} chart mappings.",
+                "missing": [],
+            }
+
+        return {
+            "ok": False,
+            "status": "mismatch",
+            "message": f"Only {matched}/{len(expected)} requested chart mappings were verified.",
+            "missing": missing,
+            "retry_suggestion": "Retry with explicit pairs (e.g., Category + Sales, Region + Sales).",
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
