@@ -35,6 +35,7 @@ class ChatRequest(BaseModel):
     selected_range: Optional[str] = None
     memory_context: Optional[str] = None
     enable_reasoning: Optional[bool] = True
+    conversation_history: Optional[List[dict]] = []
 
 
 class ExecuteRequest(BaseModel):
@@ -66,6 +67,11 @@ class VerifyChartExecutionRequest(BaseModel):
     request_message: str
     expected_charts: List[dict]
     created_charts: List[dict]
+
+
+class GenerateDataRequest(BaseModel):
+    data_type: str = "employee"
+    count: int = 100
 
 
 class ChatResponse(BaseModel):
@@ -145,12 +151,15 @@ TABLE SCHEMA (deterministic context agent output):
 
 {memory_info}
 
+{history_info}
+
 Reasoning analysis:
 {reasoning_output}
 
 Available actions: get_workbook_structure, get_selected_range, get_range, get_sheet_data,
 set_values, set_formulas, apply_format, insert_rows, delete_rows, insert_columns,
-delete_columns, add_worksheet, delete_worksheet, create_table, sort_range, auto_fill, create_chart
+delete_columns, add_worksheet, delete_worksheet, create_table, sort_range, auto_fill, create_chart,
+conditional_format, find_replace, merge_cells, unmerge_cells
 
 IMPORTANT - For creating tables with sample data:
 - First use set_values to write the header row and data rows
@@ -166,6 +175,22 @@ IMPORTANT - BORDERS:
 - When user asks for "border", "add border", "outer border", "all borders", "grid lines", "pivot style border" → use apply_format with border_all=true, border_color, border_style, border_style options: Continuous, Dash, Dot, DashDot, Double; weight options: Hairline, Thin, Medium, Thick; default: border_style="Continuous", border_weight="Thin", border_color="#000000"
 - Example: "add border" → apply_format with border_all=true, border_color="#000000", border_style="Continuous", border_weight="Thin"
 - Example: "thick border" → apply_format with border_all=true, border_weight="Thick"
+
+IMPORTANT - CONDITIONAL FORMATTING:
+- When user says "highlight cells > 100", "color cells where value is negative", "red if less than 50" → use conditional_format
+- Params: address, rule_type="cellValue", operator (GreaterThan/LessThan/EqualTo/Between/etc.), formula1 (the threshold value), fill_color (highlight color)
+- Example: "highlight cells > 100 in yellow" → conditional_format with address, operator="GreaterThan", formula1="100", fill_color="#FFFF00"
+- Example: "red if negative" → conditional_format with operator="LessThan", formula1="0", fill_color="#FF0000"
+- Example: "green if between 50 and 100" → conditional_format with operator="Between", formula1="50", formula2="100", fill_color="#00FF00"
+
+IMPORTANT - FIND AND REPLACE:
+- When user says "replace X with Y", "change all 'old' to 'new'", "find and replace" → use find_replace
+- Params: address, find_text, replace_text, match_case (optional, default false)
+- Example: "replace 'USA' with 'United States'" → find_replace with find_text="USA", replace_text="United States"
+
+IMPORTANT - MERGE/UNMERGE CELLS:
+- When user says "merge these cells", "combine A1:D1" → use merge_cells with address
+- When user says "unmerge", "split merged cells" → use unmerge_cells with address
 
 For charts (create_chart), use these params:
 - chart_type: "column", "bar", "line", "pie", "pie3D", "doughnut", "area", "scatter", "radar", "surface", "bubble"
@@ -434,7 +459,9 @@ def _score_header_match(header: str, term: str) -> float:
     return overlap / max(len(h_tokens), len(t_tokens))
 
 
-def _resolve_best_header_index(headers: List[str], term: str, threshold: float = 0.55) -> Optional[int]:
+def _resolve_best_header_index(
+    headers: List[str], term: str, threshold: float = 0.55
+) -> Optional[int]:
     best_idx = None
     best_score = 0.0
     for i, header in enumerate(headers):
@@ -996,111 +1023,366 @@ async def generate_charts(req: ChartRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/api/generate-chart")
-async def generate_chart(req: ChartRequest):
-    """Generate chart from data - samples large data automatically."""
-    try:
-        import matplotlib
+def _generate_sample_data(data_type: str, count: int) -> tuple:
+    """Generate realistic sample data. Returns (headers, rows)."""
+    import random
 
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
-        import numpy as np
+    random.seed(42)  # Reproducible data
+    count = min(max(count, 1), 10000)
 
-        if not req.data or len(req.data) < 2:
-            return {"error": "Not enough data"}
+    first_names = [
+        "James",
+        "Mary",
+        "John",
+        "Patricia",
+        "Robert",
+        "Jennifer",
+        "Michael",
+        "Linda",
+        "William",
+        "Elizabeth",
+        "David",
+        "Barbara",
+        "Richard",
+        "Susan",
+        "Joseph",
+        "Jessica",
+        "Thomas",
+        "Sarah",
+        "Charles",
+        "Karen",
+        "Raj",
+        "Priya",
+        "Amit",
+        "Ananya",
+        "Vikram",
+        "Deepa",
+        "Arjun",
+        "Meera",
+        "Rohan",
+        "Kavita",
+        "Wei",
+        "Xiao",
+        "Ming",
+        "Fang",
+        "Jing",
+        "Hiroshi",
+        "Yuki",
+        "Kenji",
+        "Sakura",
+        "Akiko",
+    ]
+    last_names = [
+        "Smith",
+        "Johnson",
+        "Williams",
+        "Brown",
+        "Jones",
+        "Garcia",
+        "Miller",
+        "Davis",
+        "Rodriguez",
+        "Martinez",
+        "Hernandez",
+        "Lopez",
+        "Gonzalez",
+        "Wilson",
+        "Anderson",
+        "Thomas",
+        "Taylor",
+        "Moore",
+        "Jackson",
+        "Martin",
+        "Sharma",
+        "Patel",
+        "Singh",
+        "Kumar",
+        "Gupta",
+        "Verma",
+        "Reddy",
+        "Joshi",
+        "Rao",
+        "Nair",
+        "Wang",
+        "Li",
+        "Zhang",
+        "Liu",
+        "Chen",
+        "Tanaka",
+        "Suzuki",
+        "Yamamoto",
+        "Nakamura",
+        "Watanabe",
+    ]
+    departments = [
+        "Engineering",
+        "Marketing",
+        "Sales",
+        "HR",
+        "Finance",
+        "Operations",
+        "IT",
+        "Legal",
+        "Product",
+        "Design",
+    ]
+    cities = [
+        "New York",
+        "London",
+        "Tokyo",
+        "Mumbai",
+        "Sydney",
+        "Berlin",
+        "Paris",
+        "Toronto",
+        "Singapore",
+        "Dubai",
+    ]
+    products = [
+        "Widget A",
+        "Widget B",
+        "Gadget X",
+        "Gadget Y",
+        "Tool Pro",
+        "Tool Lite",
+        "Service Basic",
+        "Service Premium",
+        "Pack Standard",
+        "Pack Enterprise",
+    ]
+    categories = ["Electronics", "Fashion", "Accessories", "Home & Garden", "Sports"]
+    blood_params = [
+        "Hemoglobin",
+        "WBC",
+        "RBC",
+        "Platelets",
+        "Glucose",
+        "Cholesterol",
+        "Creatinine",
+        "Urea",
+        "ALT",
+        "AST",
+        "Bilirubin",
+        "Albumin",
+        "Calcium",
+        "Iron",
+        "Vitamin D",
+    ]
+    subjects = [
+        "Math",
+        "Physics",
+        "Chemistry",
+        "Biology",
+        "English",
+        "History",
+        "Geography",
+        "Computer Science",
+    ]
 
-        headers = req.data[0]
-        rows = req.data[1:]
-
-        sample_size = min(1000, len(rows))
-        step = max(1, len(rows) // sample_size)
-        sampled_rows = rows[::step]
-
-        x_data = None
-        y_data = None
-
-        if req.x_column and req.y_column:
-            try:
-                x_idx = headers.index(req.x_column) if req.x_column in headers else 0
-                y_idx = headers.index(req.y_column) if req.y_column in headers else 1
-
-                x_data = [
-                    row[x_idx]
-                    for row in sampled_rows
-                    if x_idx < len(row) and row[x_idx] is not None
-                ]
-                y_data = [
-                    row[y_idx]
-                    for row in sampled_rows
-                    if y_idx < len(row) and row[y_idx] is not None
-                ]
-            except:
-                pass
-
-        if not x_data or not y_data:
-            if len(headers) >= 2:
-                x_data = [
-                    row[0]
-                    for row in sampled_rows
-                    if len(row) > 0 and row[0] is not None
-                ]
-                y_data = [
-                    row[1]
-                    for row in sampled_rows
-                    if len(row) > 1 and row[1] is not None
-                ]
-            else:
-                x_data = list(range(len(sampled_rows)))
-                y_data = [
-                    row[0]
-                    for row in sampled_rows
-                    if len(row) > 0 and row[0] is not None
-                ]
-
-        numeric_y = []
-        for v in y_data:
-            try:
-                numeric_y.append(
-                    float(str(v).replace(",", "").replace("₹", "").replace("$", ""))
-                )
-            except:
-                numeric_y.append(0)
-
-        plt.figure(figsize=(12, 6))
-
-        if req.chart_type == "bar":
-            plt.bar(range(len(numeric_y)), numeric_y, color="#217346", alpha=0.8)
-        elif req.chart_type == "pie":
-            unique_vals = list(set(numeric_y[:20]))
-            counts = [numeric_y[:20].count(v) for v in unique_vals]
-            plt.pie(
-                counts, labels=[str(v)[:10] for v in unique_vals], autopct="%1.1f%%"
+    if data_type == "blood_report":
+        headers = [
+            "Patient Name",
+            "Age",
+            "Gender",
+            "Test Parameter",
+            "Result",
+            "Unit",
+            "Reference Range",
+            "Status",
+        ]
+        rows = []
+        for i in range(count):
+            name = f"{random.choice(first_names)} {random.choice(last_names)}"
+            age = random.randint(18, 85)
+            gender = random.choice(["Male", "Female"])
+            param = random.choice(blood_params)
+            units_map = {
+                "Hemoglobin": "g/dL",
+                "WBC": "cells/µL",
+                "RBC": "million/µL",
+                "Platelets": "cells/µL",
+                "Glucose": "mg/dL",
+                "Cholesterol": "mg/dL",
+                "Creatinine": "mg/dL",
+                "Urea": "mg/dL",
+                "ALT": "U/L",
+                "AST": "U/L",
+                "Bilirubin": "mg/dL",
+                "Albumin": "g/dL",
+                "Calcium": "mg/dL",
+                "Iron": "µg/dL",
+                "Vitamin D": "ng/mL",
+            }
+            ranges_map = {
+                "Hemoglobin": (12.0, 17.5),
+                "WBC": (4000, 11000),
+                "RBC": (4.2, 5.8),
+                "Platelets": (150000, 400000),
+                "Glucose": (70, 110),
+                "Cholesterol": (0, 200),
+                "Creatinine": (0.6, 1.2),
+                "Urea": (7, 20),
+                "ALT": (7, 56),
+                "AST": (10, 40),
+                "Bilirubin": (0.1, 1.2),
+                "Albumin": (3.5, 5.0),
+                "Calcium": (8.5, 10.5),
+                "Iron": (60, 170),
+                "Vitamin D": (30, 100),
+            }
+            unit = units_map.get(param, "")
+            ref_low, ref_high = ranges_map.get(param, (0, 100))
+            result = round(random.uniform(ref_low * 0.7, ref_high * 1.3), 1)
+            status = (
+                "Normal"
+                if ref_low <= result <= ref_high
+                else ("Low" if result < ref_low else "High")
             )
-        elif req.chart_type == "scatter":
-            plt.scatter(range(len(numeric_y)), numeric_y, alpha=0.5, color="#217346")
-        else:
-            plt.plot(numeric_y, color="#217346", linewidth=1, alpha=0.8)
+            rows.append(
+                [
+                    name,
+                    age,
+                    gender,
+                    param,
+                    result,
+                    unit,
+                    f"{ref_low}-{ref_high}",
+                    status,
+                ]
+            )
 
-        plt.title(req.title, fontsize=14, fontweight="bold")
-        plt.xlabel("Index", fontsize=10)
-        plt.ylabel("Value", fontsize=10)
-        plt.grid(True, alpha=0.3)
-        plt.tight_layout()
+    elif data_type == "employee":
+        headers = [
+            "Employee ID",
+            "Name",
+            "Department",
+            "Designation",
+            "Salary",
+            "Join Date",
+            "City",
+            "Performance Rating",
+        ]
+        rows = []
+        for i in range(count):
+            emp_id = f"EMP{1000 + i}"
+            name = f"{random.choice(first_names)} {random.choice(last_names)}"
+            dept = random.choice(departments)
+            designations = {
+                "Engineering": [
+                    "Software Engineer",
+                    "Senior Engineer",
+                    "Tech Lead",
+                    "Architect",
+                ],
+                "Marketing": ["Marketing Exec", "Campaign Manager", "Brand Lead"],
+                "Sales": ["Sales Rep", "Account Manager", "Sales Director"],
+                "HR": ["HR Exec", "HR Manager", "HR Director"],
+                "Finance": ["Analyst", "Sr Analyst", "Finance Manager"],
+                "Operations": ["Ops Exec", "Ops Manager", "Ops Director"],
+                "IT": ["IT Support", "Sys Admin", "IT Manager"],
+                "Legal": ["Legal Exec", "Legal Counsel", "Legal Director"],
+                "Product": ["Product Analyst", "Product Manager", "Product Director"],
+                "Design": ["UI Designer", "UX Designer", "Design Lead"],
+            }
+            designation = random.choice(designations.get(dept, ["Associate"]))
+            salary = random.randint(30000, 150000)
+            join_date = f"{random.randint(2018, 2024)}-{random.randint(1, 12):02d}-{random.randint(1, 28):02d}"
+            city = random.choice(cities)
+            rating = round(random.uniform(2.0, 5.0), 1)
+            rows.append(
+                [emp_id, name, dept, designation, salary, join_date, city, rating]
+            )
 
-        buf = io.BytesIO()
-        plt.savefig(buf, format="png", dpi=100, bbox_inches="tight")
-        plt.close()
+    elif data_type == "sales":
+        headers = [
+            "Order ID",
+            "Date",
+            "Product",
+            "Category",
+            "Quantity",
+            "Unit Price",
+            "Total",
+            "Region",
+            "Customer",
+        ]
+        rows = []
+        for i in range(count):
+            order_id = f"ORD{10000 + i}"
+            date = f"2024-{random.randint(1, 12):02d}-{random.randint(1, 28):02d}"
+            product = random.choice(products)
+            category = random.choice(categories)
+            qty = random.randint(1, 50)
+            unit_price = round(random.uniform(10, 500), 2)
+            total = round(qty * unit_price, 2)
+            region = random.choice(["North", "South", "East", "West", "Central"])
+            customer = f"{random.choice(first_names)} {random.choice(last_names)}"
+            rows.append(
+                [
+                    order_id,
+                    date,
+                    product,
+                    category,
+                    qty,
+                    unit_price,
+                    total,
+                    region,
+                    customer,
+                ]
+            )
 
-        buf.seek(0)
-        img_base64 = base64.b64encode(buf.read()).decode()
+    elif data_type == "student":
+        headers = [
+            "Student ID",
+            "Name",
+            "Grade",
+            "Subject",
+            "Marks",
+            "Max Marks",
+            "Percentage",
+            "Result",
+        ]
+        rows = []
+        for i in range(count):
+            sid = f"STU{1000 + i}"
+            name = f"{random.choice(first_names)} {random.choice(last_names)}"
+            grade = random.choice(["9th", "10th", "11th", "12th"])
+            subject = random.choice(subjects)
+            max_marks = 100
+            marks = random.randint(20, 100)
+            pct = round((marks / max_marks) * 100, 1)
+            result = "Pass" if marks >= 35 else "Fail"
+            rows.append([sid, name, grade, subject, marks, max_marks, pct, result])
 
+    else:
+        # Generic fallback
+        headers = ["ID", "Name", "Value", "Category", "Date"]
+        rows = []
+        for i in range(count):
+            rows.append(
+                [
+                    i + 1,
+                    f"Item {i + 1}",
+                    round(random.uniform(10, 1000), 2),
+                    random.choice(["A", "B", "C"]),
+                    f"2024-{random.randint(1, 12):02d}-{random.randint(1, 28):02d}",
+                ]
+            )
+
+    return headers, rows
+
+
+@app.post("/api/generate-data")
+async def generate_data(req: GenerateDataRequest):
+    """Generate sample data tables (employee, sales, blood report, student, etc.)."""
+    try:
+        headers, rows = _generate_sample_data(req.data_type, req.count)
+        data = [headers] + rows
         return {
-            "chart_image": f"data:image/png;base64,{img_base64}",
-            "sampled_points": len(sampled_rows),
-            "total_rows": len(rows),
-            "chart_type": req.chart_type,
+            "data": data,
+            "headers": headers,
+            "row_count": len(rows),
+            "col_count": len(headers),
         }
-
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -1152,6 +1434,21 @@ async def chat(req: ChatRequest):
             f"Memory context:\n{req.memory_context}" if req.memory_context else ""
         )
 
+        # Build conversation history for multi-turn context
+        history_info = ""
+        if req.conversation_history and len(req.conversation_history) > 0:
+            recent = req.conversation_history[-6:]  # Last 3 exchanges (6 messages)
+            history_lines = []
+            for msg in recent:
+                role = msg.get("role", "user")
+                content = str(msg.get("content", ""))[:300]  # Truncate long messages
+                if role == "user":
+                    history_lines.append(f"User: {content}")
+                elif role == "assistant":
+                    history_lines.append(f"Assistant: {content}")
+            if history_lines:
+                history_info = "RECENT CONVERSATION:\n" + "\n".join(history_lines)
+
         # Only run reasoning agent if enabled
         reasoning = ""
         if req.enable_reasoning or req.enable_reasoning is None:
@@ -1178,6 +1475,10 @@ IMPORTANT:
 User: {req.message}
 {context_info}
 {selected_info}
+{history_info}
+
+COLUMN HEADERS: {headers_context or "No column headers available"}
+TABLE SCHEMA: {schema_context or "No schema available"}
 
 IMPORTANT - Describe what YOU will do, NOT manual steps:
 - Say "I will apply...", "I'll format...", "I'll create..." 
@@ -1229,6 +1530,7 @@ No asterisks or markdown.""",
                     headers_context=headers_context,
                     schema_context=schema_context or "No schema available",
                     memory_info=memory_info,
+                    history_info=history_info,
                     reasoning_output=reasoning
                     if reasoning
                     else "No reasoning available",
@@ -1477,7 +1779,9 @@ async def resolve_chart_intent(req: ChartIntentRequest):
         if phrase:
             terms.extend([phrase.group(1).strip(), phrase.group(2).strip()])
         else:
-            pair = re.search(r"(.+?)\s+(?:vs|versus|and|by)\s+(.+?)(?:$|[,.!?])", message)
+            pair = re.search(
+                r"(.+?)\s+(?:vs|versus|and|by)\s+(.+?)(?:$|[,.!?])", message
+            )
             if pair:
                 terms.extend([pair.group(1).strip(), pair.group(2).strip()])
 
@@ -1496,19 +1800,43 @@ async def resolve_chart_intent(req: ChartIntentRequest):
         for line in normalized_lines:
             line_l = line.lower()
             # Explicit plus pairs
-            for m in re.finditer(r"([a-z0-9][a-z0-9 _/-]{0,40})\s*\+\s*([a-z0-9][a-z0-9 _/-]{0,40})", line_l):
+            for m in re.finditer(
+                r"([a-z0-9][a-z0-9 _/-]{0,40})\s*\+\s*([a-z0-9][a-z0-9 _/-]{0,40})",
+                line_l,
+            ):
                 multi_pairs.append([m.group(1).strip(), m.group(2).strip()])
             # "x and y / x vs y / x by y" pairs
-            for m in re.finditer(r"([a-z0-9][a-z0-9 _/-]{0,40})\s+(and|vs|versus|by)\s+([a-z0-9][a-z0-9 _/-]{0,40})", line_l):
+            for m in re.finditer(
+                r"([a-z0-9][a-z0-9 _/-]{0,40})\s+(and|vs|versus|by)\s+([a-z0-9][a-z0-9 _/-]{0,40})",
+                line_l,
+            ):
                 left = m.group(1).strip()
                 right = m.group(3).strip()
-                if left not in {"make", "create", "use", "chart", "pie", "bar", "line"} and right not in {"chart"}:
+                if left not in {
+                    "make",
+                    "create",
+                    "use",
+                    "chart",
+                    "pie",
+                    "bar",
+                    "line",
+                } and right not in {"chart"}:
                     multi_pairs.append([left, right])
 
         # Deduplicate and keep high-signal pairs
         pair_seen = set()
         cleaned_pairs: List[List[str]] = []
-        noise_terms = {"pie", "bar", "line", "chart", "graph", "plot", "use", "make", "create"}
+        noise_terms = {
+            "pie",
+            "bar",
+            "line",
+            "chart",
+            "graph",
+            "plot",
+            "use",
+            "make",
+            "create",
+        }
         for left, right in multi_pairs:
             l = left.strip(" -:,.")
             r = right.strip(" -:,.")
@@ -1529,16 +1857,49 @@ async def resolve_chart_intent(req: ChartIntentRequest):
 
         # 4) Token fallback
         skip_words = {
-            "bar", "graph", "chart", "pie", "line", "make", "create", "show",
-            "display", "the", "a", "an", "of", "to", "for", "between", "with",
-            "on", "in", "and", "vs", "versus", "column", "columns", "can", "you",
+            "bar",
+            "graph",
+            "chart",
+            "pie",
+            "line",
+            "make",
+            "create",
+            "show",
+            "display",
+            "the",
+            "a",
+            "an",
+            "of",
+            "to",
+            "for",
+            "between",
+            "with",
+            "on",
+            "in",
+            "and",
+            "vs",
+            "versus",
+            "column",
+            "columns",
+            "can",
+            "you",
         }
-        user_tokens = [t for t in _tokenize(message) if len(t) > 1 and t not in skip_words]
+        user_tokens = [
+            t for t in _tokenize(message) if len(t) > 1 and t not in skip_words
+        ]
         for i, h in enumerate(headers):
             hn = _normalize_text(h)
             h_tokens = _tokenize(hn)
             for tok in user_tokens:
-                if tok in hn or hn in tok or any(ht.startswith(tok[:3]) or tok.startswith(ht[:3]) for ht in h_tokens if len(ht) >= 3):
+                if (
+                    tok in hn
+                    or hn in tok
+                    or any(
+                        ht.startswith(tok[:3]) or tok.startswith(ht[:3])
+                        for ht in h_tokens
+                        if len(ht) >= 3
+                    )
+                ):
                     scores[i] += 1
                     picked.add(i)
                     break
@@ -1548,11 +1909,14 @@ async def resolve_chart_intent(req: ChartIntentRequest):
         # If user used a clear pair phrase but we cannot confidently map 2 columns, ask.
         if len(terms) >= 2 and len(ranked) < 2:
             suggestions = [headers[i] for i in ranked[:3]] if ranked else headers[:3]
-            suggestion_text = ", ".join([s for s in suggestions if s]) or "the column names in your table"
+            suggestion_text = (
+                ", ".join([s for s in suggestions if s])
+                or "the column names in your table"
+            )
             return {
                 "needs_clarification": True,
                 "reason": f'Could not confidently map both requested fields from "{terms[0]}" and "{terms[1]}"',
-                "clarification_question": f'I found close columns: {suggestion_text}. Which exact two columns should I use?',
+                "clarification_question": f"I found close columns: {suggestion_text}. Which exact two columns should I use?",
                 "chart_type": chart_type,
             }
 
@@ -1625,7 +1989,8 @@ async def resolve_chart_intent(req: ChartIntentRequest):
                 else ""
             ),
             "ranked_candidates": [
-                {"index": i, "header": headers[i], "score": scores[i]} for i in ranked[:6]
+                {"index": i, "header": headers[i], "score": scores[i]}
+                for i in ranked[:6]
             ],
         }
     except Exception as e:
@@ -1668,7 +2033,9 @@ async def verify_chart_execution(req: VerifyChartExecutionRequest):
             if found:
                 matched += 1
             else:
-                missing.append({"x_header": exp.get("x_header"), "y_header": exp.get("y_header")})
+                missing.append(
+                    {"x_header": exp.get("x_header"), "y_header": exp.get("y_header")}
+                )
 
         ok = matched == len(expected)
         if ok:
@@ -1725,9 +2092,13 @@ If no recovery is possible, return: []"""
 @app.post("/api/reflect")
 async def reflect(req: ReflectRequest):
     try:
+        from crewai import Agent, Task, Crew, Process
+
         failed_results = [r for r in req.results if not r.get("success")]
         if not failed_results:
             return {"recovery": []}
+
+        model = setup_env(req.provider, req.model, req.api_key)
 
         plan_str = "\n".join(
             [
@@ -1748,24 +2119,30 @@ async def reflect(req: ReflectRequest):
             results=results_str,
         )
 
-        from openai import OpenAI
-
-        client = OpenAI(api_key=req.api_key, base_url="https://api.openai.com/v1")
-
-        response = client.chat.completions.create(
-            model=req.model,
-            messages=[
-                {
-                    "role": "system",
-                    "content": "You are a self-correction agent. Return ONLY valid JSON.",
-                },
-                {"role": "user", "content": prompt},
-            ],
-            temperature=0.3,
-            max_tokens=1000,
+        reflector = Agent(
+            role="Self-Correction Agent",
+            goal="Analyze failed Excel operations and create minimal recovery plans",
+            backstory="You are a self-correction agent that analyzes failed steps and returns only valid JSON recovery plans.",
+            verbose=False,
+            allow_delegation=False,
+            llm=model,
         )
 
-        output = response.choices[0].message.content or "[]"
+        reflect_task = Task(
+            description=prompt,
+            expected_output="A valid JSON array of recovery steps, or empty array [] if no recovery possible.",
+            agent=reflector,
+        )
+
+        crew = Crew(
+            agents=[reflector],
+            tasks=[reflect_task],
+            process=Process.sequential,
+            verbose=False,
+        )
+
+        result = crew.kickoff()
+        output = str(result.raw) if hasattr(result, "raw") else str(result)
 
         # Try to extract JSON from response
         json_match = re.search(r"\[.*\]", output, re.DOTALL)

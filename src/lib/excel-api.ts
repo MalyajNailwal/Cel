@@ -744,3 +744,93 @@ export async function createChartFromTwoColumns(
     }
   });
 }
+
+export async function conditionalFormat(
+  address: string,
+  rule: { type: 'cellValue' | 'colorScale' | 'dataBar'; operator?: string; formula1?: string; formula2?: string; format?: { fillColor?: string; fontColor?: string; bold?: boolean } },
+  sheetName?: string
+): Promise<void> {
+  await Excel.run(async (context) => {
+    const sheet = sheetName
+      ? context.workbook.worksheets.getItem(sheetName)
+      : context.workbook.worksheets.getActiveWorksheet();
+    const range = sheet.getRange(address);
+
+    if (rule.type === 'cellValue' && rule.operator && rule.formula1) {
+      const cf = range.conditionalFormats.add(Excel.ConditionalFormatType.cellValue);
+      cf.cellValue.format.fill.color = rule.format?.fillColor || '#FFFF00';
+      if (rule.format?.fontColor) cf.cellValue.format.font.color = rule.format.fontColor;
+      if (rule.format?.bold) cf.cellValue.format.font.bold = true;
+      cf.cellValue.rule = {
+        formula1: rule.formula1,
+        formula2: rule.formula2 || '',
+        operator: rule.operator as any,
+      };
+    }
+
+    await context.sync();
+  });
+}
+
+export async function findAndReplace(
+  address: string,
+  findText: string,
+  replaceText: string,
+  matchCase: boolean = false,
+  sheetName?: string
+): Promise<number> {
+  return await Excel.run(async (context) => {
+    const sheet = sheetName
+      ? context.workbook.worksheets.getItem(sheetName)
+      : context.workbook.worksheets.getActiveWorksheet();
+    const range = sheet.getRange(address);
+    range.load('values');
+    await context.sync();
+
+    const values = range.values as (string | number | boolean | null)[][];
+    let replacedCount = 0;
+
+    const newValues = values.map((row) =>
+      row.map((cell) => {
+        if (typeof cell === 'string') {
+          const flags = matchCase ? 'g' : 'gi';
+          const escaped = findText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          const regex = new RegExp(escaped, flags);
+          const result = cell.replace(regex, replaceText);
+          if (result !== cell) replacedCount++;
+          return result;
+        }
+        return cell;
+      })
+    );
+
+    if (replacedCount > 0) {
+      range.values = newValues;
+      await context.sync();
+    }
+
+    return replacedCount;
+  });
+}
+
+export async function mergeCells(address: string, sheetName?: string): Promise<void> {
+  await Excel.run(async (context) => {
+    const sheet = sheetName
+      ? context.workbook.worksheets.getItem(sheetName)
+      : context.workbook.worksheets.getActiveWorksheet();
+    const range = sheet.getRange(address);
+    range.merge(true);
+    await context.sync();
+  });
+}
+
+export async function unmergeCells(address: string, sheetName?: string): Promise<void> {
+  await Excel.run(async (context) => {
+    const sheet = sheetName
+      ? context.workbook.worksheets.getItem(sheetName)
+      : context.workbook.worksheets.getActiveWorksheet();
+    const range = sheet.getRange(address);
+    range.unmerge();
+    await context.sync();
+  });
+}

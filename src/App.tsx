@@ -6,7 +6,7 @@ import { SettingsPanel } from '@/components/SettingsPanel';
 import { useConfirm, ConfirmModal } from '@/components/ConfirmModal';
 import type { ChatMessage, AIProvider } from '@/lib/ai-providers';
 import * as ExcelAPI from '@/lib/excel-api';
-import { loadMemory, saveMemory, addMistake, trackOperation, addCheckpoint, getCheckpoints, getMemoryContext } from '@/lib/memory';
+import { loadMemory, saveMemory, addMistake, trackOperation, addCheckpoint, getCheckpoints, removeCheckpoint, getMemoryContext } from '@/lib/memory';
 
 type ProcessingPhase =
   | 'idle'
@@ -76,6 +76,7 @@ export default function App() {
   const [showScrollDown, setShowScrollDown] = useState(false);
   const [reasoningEnabled, setReasoningEnabled] = useState(true);
   const [selectedRange, setSelectedRange] = useState<SelectedRangeInfo | null>(null);
+  const [executionProgress, setExecutionProgress] = useState<{ current: number; total: number; action: string } | null>(null);
   const [settings, setSettings] = useState<Settings>(() => {
     try {
       const saved = localStorage.getItem('excel-ai-settings');
@@ -117,6 +118,27 @@ export default function App() {
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, []);
+
+  const handleUndo = useCallback(async () => {
+    const checkpoints = getCheckpoints();
+    if (checkpoints.length === 0) return;
+    const latest = checkpoints[0]; // Most recent is first
+    try {
+      await ExcelAPI.setValues(latest.address, latest.values, latest.sheet);
+      removeCheckpoint(latest.id);
+      setMessages((prev) => [...prev, {
+        id: `ai-${Date.now()}`,
+        role: 'assistant',
+        content: `Restored ${latest.sheet}!${latest.address} to its previous state (before ${latest.description}).`,
+      }]);
+    } catch (err: any) {
+      setMessages((prev) => [...prev, {
+        id: `ai-${Date.now()}`,
+        role: 'assistant',
+        content: `Failed to restore checkpoint: ${err.message}`,
+      }]);
+    }
   }, []);
 
   const getApiKey = useCallback((): string => {
@@ -173,6 +195,10 @@ export default function App() {
             selected_range: selectedRangeData,
             memory_context: getMemoryContext(),
             enable_reasoning: reasoningEnabled,
+            conversation_history: messagesRef.current
+              .filter(m => m.role === 'user' || m.role === 'assistant')
+              .slice(-6)  // Last 3 exchanges
+              .map(m => ({ role: m.role, content: m.content.slice(0, 500) })),
           }),
         });
 
@@ -1025,6 +1051,9 @@ export default function App() {
           const step = validSteps[i];
           const params = { ...step.params };
 
+          // Update live step progress
+          setExecutionProgress({ current: i + 1, total: validSteps.length, action: step.action });
+
           // CRITICAL: Force selected range for write operations when user refers to selection
           console.log('[EXECUTION] Final check - userWantsSelected:', userWantsSelected, '| react selectedRange state:', selectedRange, '| step.action:', step.action, '| original params:', { address: params.address, sheet_name: params.sheet_name });
           if (userWantsSelected && selectedRange) {
@@ -1692,6 +1721,7 @@ export default function App() {
       } finally {
         setIsProcessing(false);
         setProcessingPhase('idle');
+        setExecutionProgress(null);
       }
     },
     [settings, getApiKey]
@@ -1736,6 +1766,16 @@ export default function App() {
         </div>
         <div className="flex items-center gap-1">
           <button
+            onClick={handleUndo}
+            className="w-7 h-7 rounded-lg hover:bg-white/10 flex items-center justify-center text-white/50 hover:text-white/80 transition-all"
+            title="Undo last operation"
+          >
+            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <polyline points="1 4 1 10 7 10" />
+              <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
+            </svg>
+          </button>
+          <button
             onClick={() => setMessages([])}
             className="w-7 h-7 rounded-lg hover:bg-white/10 flex items-center justify-center text-white/50 hover:text-white/80 transition-all"
             title="Clear chat"
@@ -1761,7 +1801,11 @@ export default function App() {
       {isProcessing && (
         <div className="flex-shrink-0 px-3 py-1.5 bg-gradient-to-r from-violet-50/80 to-purple-50/80 border-b border-violet-100/80 flex items-center gap-2.5 animate-fade-in">
           <div className={cn('w-1.5 h-1.5 rounded-full animate-pulse', `bg-${phase.accent?.split(' ')[0]?.replace('from-', '') || 'violet-500'}`)} />
-          <span className={cn('text-[11px] font-semibold', phase.color)}>{phase.label}</span>
+          <span className={cn('text-[11px] font-semibold', phase.color)}>
+            {processingPhase === 'executing' && executionProgress
+              ? `Step ${executionProgress.current}/${executionProgress.total}: ${executionProgress.action.replace(/_/g, ' ')}`
+              : phase.label}
+          </span>
           <div className="flex-1 h-1 bg-gray-200/60 rounded-full overflow-hidden">
             <div
               className={cn('h-full rounded-full transition-all duration-500')}
@@ -1809,7 +1853,7 @@ export default function App() {
         }}
       >
         {messages.length === 0 ? (
-          <WelcomeScreen />
+          <WelcomeScreen selectedRange={selectedRange} />
         ) : (
           <>
             {messages.map((msg) => (
@@ -1894,6 +1938,21 @@ async function executeStep(step: { action: string; params: Record<string, any>; 
     case 'sort_range': await ExcelAPI.sortRange(params.address, params.column_index, params.ascending, params.sheet_name); return `Sorted ${params.address} by column ${params.column_index}`;
     case 'auto_fill': await ExcelAPI.autoFill(params.source_address, params.target_address, params.sheet_name); return `Autofilled from ${params.source_address} to ${params.target_address}`;
     case 'create_chart': return await ExcelAPI.createChart(params.chart_type, params.data_range, params.sheet_name, params.title, params.position);
+    case 'conditional_format':
+      await ExcelAPI.conditionalFormat(params.address, {
+        type: params.rule_type || 'cellValue',
+        operator: params.operator,
+        formula1: params.formula1,
+        formula2: params.formula2,
+        format: { fillColor: params.fill_color, fontColor: params.font_color, bold: params.bold },
+      }, params.sheet_name);
+      return `Conditional formatting applied to ${params.address}`;
+    case 'find_replace': {
+      const count = await ExcelAPI.findAndReplace(params.address, params.find_text, params.replace_text, params.match_case || false, params.sheet_name);
+      return `Replaced ${count} occurrence(s) in ${params.address}`;
+    }
+    case 'merge_cells': await ExcelAPI.mergeCells(params.address, params.sheet_name); return `Merged cells ${params.address}`;
+    case 'unmerge_cells': await ExcelAPI.unmergeCells(params.address, params.sheet_name); return `Unmerged cells ${params.address}`;
     default: throw new Error(`Unknown action: ${action}`);
   }
 }
@@ -1947,7 +2006,7 @@ async function getSelectedRangeData(): Promise<string | null> {
 function validatePlan(plan: { action: string; params: Record<string, any>; description: string }[], userMessage: string = ''): { validSteps: { action: string; params: Record<string, any>; description: string }[]; validationErrors: string[] } {
   const validSteps: { action: string; params: Record<string, any>; description: string }[] = [];
   const validationErrors: string[] = [];
-  const VALID_ACTIONS = new Set(['get_workbook_structure', 'get_selected_range', 'get_range', 'get_sheet_data', 'set_values', 'set_formulas', 'apply_format', 'insert_rows', 'delete_rows', 'insert_columns', 'delete_columns', 'add_worksheet', 'delete_worksheet', 'create_table', 'sort_range', 'auto_fill', 'create_chart']);
+  const VALID_ACTIONS = new Set(['get_workbook_structure', 'get_selected_range', 'get_range', 'get_sheet_data', 'set_values', 'set_formulas', 'apply_format', 'insert_rows', 'delete_rows', 'insert_columns', 'delete_columns', 'add_worksheet', 'delete_worksheet', 'create_table', 'sort_range', 'auto_fill', 'create_chart', 'conditional_format', 'find_replace', 'merge_cells', 'unmerge_cells']);
   for (let i = 0; i < plan.length; i++) {
     const step = plan[i];
     if (!VALID_ACTIONS.has(step.action)) { validationErrors.push(`Step ${i + 1}: Unknown action "${step.action}" — skipping`); continue; }

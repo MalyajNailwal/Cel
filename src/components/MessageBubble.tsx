@@ -414,7 +414,21 @@ export const TypingIndicator: React.FC<{ phase?: string }> = ({ phase = 'thinkin
   );
 };
 
-export const WelcomeScreen: React.FC = () => {
+export const WelcomeScreen: React.FC<{ selectedRange?: { address: string; sheetName: string; rowCount: number; columnCount: number } | null }> = ({ selectedRange }) => {
+  const suggestions = selectedRange
+    ? [
+        `analyze this ${selectedRange.rowCount}×${selectedRange.columnCount} data`,
+        `create a chart from this data`,
+        `add borders to ${selectedRange.address}`,
+        `sum the numeric columns`,
+      ]
+    : [
+        'add a new sheet called Sales',
+        'create a table with 100 employees',
+        'sum of this column',
+        'show trends in this data',
+      ];
+
   return (
     <div className="flex-1 flex flex-col items-center justify-center px-4 py-6 animate-fade-in">
       <div className="w-16 h-16 rounded-2xl bg-[#217346] flex items-center justify-center mb-5 shadow-lg shadow-[#217346]/25">
@@ -422,15 +436,19 @@ export const WelcomeScreen: React.FC = () => {
       </div>
       <h2 className="text-2xl font-bold text-gray-900 mb-1">Cel</h2>
       <p className="text-sm text-gray-500 mb-6">
-        Tell me what to do. Consider it done.
+        {selectedRange
+          ? `${selectedRange.sheetName}!${selectedRange.address} selected (${selectedRange.rowCount}×${selectedRange.columnCount})`
+          : 'Tell me what to do. Consider it done.'}
       </p>
       <div className="w-full max-w-[260px] space-y-2">
         <div className="p-3 rounded-xl bg-gray-50 border border-gray-100">
-          <p className="text-xs font-medium text-gray-500 mb-2">Try saying:</p>
+          <p className="text-xs font-medium text-gray-500 mb-2">
+            {selectedRange ? 'Try with this selection:' : 'Try saying:'}
+          </p>
           <div className="space-y-1.5">
-            <p className="text-sm text-gray-700">"add a new sheet called Sales"</p>
-            <p className="text-sm text-gray-700">"sum of this column"</p>
-            <p className="text-sm text-gray-700">"show trends in this data"</p>
+            {suggestions.map((s, i) => (
+              <p key={i} className="text-sm text-gray-700">"{s}"</p>
+            ))}
           </div>
         </div>
       </div>

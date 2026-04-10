@@ -299,6 +299,76 @@ export const excelTools = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'conditional_format',
+      description: 'Apply conditional formatting to highlight cells based on rules (e.g., highlight cells > 100 in red).',
+      parameters: {
+        type: 'object',
+        properties: {
+          address: { type: 'string', description: 'Cell range in A1 notation' },
+          sheet_name: { type: 'string', description: 'Sheet name (optional)' },
+          rule_type: { type: 'string', enum: ['cellValue', 'colorScale', 'dataBar'], description: 'Type of conditional rule' },
+          operator: { type: 'string', enum: ['GreaterThan', 'LessThan', 'EqualTo', 'NotEqualTo', 'GreaterThanOrEqual', 'LessThanOrEqual', 'Between', 'NotBetween', 'ContainsText', 'NotContainsText'], description: 'Comparison operator' },
+          formula1: { type: 'string', description: 'First value/formula for comparison (e.g., "100", "=AVERAGE(A1:A10)")' },
+          formula2: { type: 'string', description: 'Second value for Between/NotBetween operators' },
+          fill_color: { type: 'string', description: 'Highlight color as hex code (e.g., "#FFFF00" for yellow)' },
+          font_color: { type: 'string', description: 'Font color as hex code' },
+          bold: { type: 'boolean', description: 'Make matching cells bold' },
+        },
+        required: ['address', 'rule_type', 'operator', 'formula1'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'find_replace',
+      description: 'Find and replace text in a range of cells.',
+      parameters: {
+        type: 'object',
+        properties: {
+          address: { type: 'string', description: 'Cell range in A1 notation' },
+          find_text: { type: 'string', description: 'Text to find' },
+          replace_text: { type: 'string', description: 'Text to replace with' },
+          match_case: { type: 'boolean', description: 'Case-sensitive search (default: false)' },
+          sheet_name: { type: 'string', description: 'Sheet name (optional)' },
+        },
+        required: ['address', 'find_text', 'replace_text'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'merge_cells',
+      description: 'Merge cells in a range into a single cell.',
+      parameters: {
+        type: 'object',
+        properties: {
+          address: { type: 'string', description: 'Cell range to merge (e.g., "A1:D1")' },
+          sheet_name: { type: 'string', description: 'Sheet name (optional)' },
+        },
+        required: ['address'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'unmerge_cells',
+      description: 'Unmerge previously merged cells back into individual cells.',
+      parameters: {
+        type: 'object',
+        properties: {
+          address: { type: 'string', description: 'Cell range to unmerge' },
+          sheet_name: { type: 'string', description: 'Sheet name (optional)' },
+        },
+        required: ['address'],
+      },
+    },
+  },
 ];
 
 const toolMap: Record<string, (...args: any[]) => Promise<any>> = {
@@ -352,6 +422,20 @@ const toolMap: Record<string, (...args: any[]) => Promise<any>> = {
     ExcelAPI.autoFill(args.source_address, args.target_address, args.sheet_name),
   create_chart: (args: any) =>
     ExcelAPI.createChart(args.chart_type, args.data_range, args.sheet_name, args.title, args.position),
+  conditional_format: (args: any) =>
+    ExcelAPI.conditionalFormat(args.address, {
+      type: args.rule_type || 'cellValue',
+      operator: args.operator,
+      formula1: args.formula1,
+      formula2: args.formula2,
+      format: { fillColor: args.fill_color, fontColor: args.font_color, bold: args.bold },
+    }, args.sheet_name),
+  find_replace: (args: { address: string; find_text: string; replace_text: string; match_case?: boolean; sheet_name?: string }) =>
+    ExcelAPI.findAndReplace(args.address, args.find_text, args.replace_text, args.match_case || false, args.sheet_name),
+  merge_cells: (args: { address: string; sheet_name?: string }) =>
+    ExcelAPI.mergeCells(args.address, args.sheet_name),
+  unmerge_cells: (args: { address: string; sheet_name?: string }) =>
+    ExcelAPI.unmergeCells(args.address, args.sheet_name),
 };
 
 export async function executeToolCall(toolCall: ToolCall): Promise<string> {
