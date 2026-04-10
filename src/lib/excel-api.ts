@@ -507,7 +507,7 @@ export async function createChart(
     const excelChartType = chartTypeMap[chartType] || Excel.ChartType.columnClustered;
 
     try {
-      const chart = sheet.charts.add(excelChartType, sourceRange, 'Columns');
+      const chart = sheet.charts.add(excelChartType, sourceRange, Excel.ChartSeriesBy.auto);
 
       if (title) {
         chart.title.text = title;
@@ -649,7 +649,7 @@ export async function createChartFromTwoColumns(
     try {
       // Build the chart from only the value range, then bind category labels explicitly.
       // This prevents accidental inclusion of middle columns in non-adjacent selections (e.g. B and D).
-      const chart = sheet.charts.add(excelChartType, valueSource, 'Columns');
+      const chart = sheet.charts.add(excelChartType, valueSource, Excel.ChartSeriesBy.auto);
       // Office.js chart typings can lag API surface, so use a guarded dynamic call.
       const chartAny = chart as any;
       if (typeof chartAny.setCategoryLabels === 'function') {
@@ -711,7 +711,7 @@ export async function createChartFromTwoColumns(
         }
         helperRange.values = merged;
 
-        const chart = sheet.charts.add(excelChartType, helperRange, 'Columns');
+        const chart = sheet.charts.add(excelChartType, helperRange, Excel.ChartSeriesBy.auto);
         if (title) {
           chart.title.text = title;
           chart.title.visible = true;
