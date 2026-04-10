@@ -97,6 +97,40 @@ Analyze and explain:
 3. How you'll approach it (agentic steps, not manual Excel steps)"""
 
 
+CLARIFICATION_PROMPT = """You are a Clarification Agent for an Excel AI assistant. Your job is to detect ambiguous requests and ask clarifying questions INSTEAD of guessing.
+
+RULES — Be STRICT about these:
+1. If the request is CLEAR and SPECIFIC (e.g., "add bold to A1:A10", "create bar chart", "sum column B", "replace X with Y", "add borders to selected cells"), return {{"needs_clarification": false}}
+2. If the request is AMBIGUOUS or VAGUE, return {{"needs_clarification": true, "question": "Your clarifying question"}}
+
+AMBIGUOUS requests include:
+- "clean the data" → Ask: "What specifically should I clean? Remove duplicates, fill empty cells, fix formatting, or something else?"
+- "make it look better" → Ask: "Should I add borders, colors, bold headers, or adjust column widths?"
+- "fix the issues" → Ask: "What issues? I can check for formula errors, duplicates, empty cells, or data type mismatches. Which one?"
+- "organize this" → Ask: "Should I sort by a column, group by category, add filters, or create a table?"
+- "format this properly" → Ask: "What format? Currency ($), percentages, dates, bold headers, or conditional formatting?"
+- "do something with this" → Ask: "I can analyze, chart, format, or modify this data. What would you like?"
+- "help me with this data" → Ask: "I can analyze trends, create charts, clean up, or add calculations. What do you need?"
+
+CLEAR requests (no clarification needed):
+- "add borders to selected cells"
+- "create a pie chart from Product and Sales columns"
+- "sum of column B"
+- "replace 'USA' with 'United States'"
+- "highlight cells greater than 100 in yellow"
+- "add a new sheet called Dashboard"
+- "sort by Salary descending"
+- "set column A to bold"
+- "create a table with 100 employees"
+- "fill formula =A1*2 down to A10"
+
+CRITICAL: If there is selected data with column headers AND the user asks about specific columns (mentioned by name), that is CLEAR — no clarification needed.
+If there is NO selected range or the request doesn't reference specific data, be MORE likely to ask for clarification.
+
+Return ONLY valid JSON:
+{{"needs_clarification": false}} OR {{"needs_clarification": true, "question": "Your question here"}}"""
+
+
 def setup_env(provider: str, model: str, api_key: str) -> str:
     """Configure environment variables for CrewAI and return the model string to use."""
     keys_to_clear = [
@@ -148,6 +182,9 @@ COLUMN HEADERS (use these for charts!):
 
 TABLE SCHEMA (deterministic context agent output):
 {schema_context}
+
+DATA QUALITY PROFILE:
+{data_profile}
 
 {memory_info}
 
@@ -546,6 +583,112 @@ def build_table_schema(data: List[List[Any]]) -> dict:
         "total_columns": len(headers),
         "columns": schema_columns,
     }
+
+
+def profile_data(data: List[List[Any]]) -> str:
+    """Deep data profiling for the planner. Returns a human-readable summary of data quality issues."""
+    if not data or len(data) < 2:
+        return "No data to profile."
+
+    headers = [
+        str(h).strip() if h is not None else f"Col{i}" for i, h in enumerate(data[0])
+    ]
+    rows = data[1:]
+    total_rows = len(rows)
+    num_cols = len(headers)
+
+    issues = []
+    highlights = []
+
+    # 1. Duplicate detection
+    seen = set()
+    dup_count = 0
+    for row in rows:
+        key = tuple(str(v) for v in row)
+        if key in seen:
+            dup_count += 1
+        seen.add(key)
+    if dup_count > 0:
+        pct = round(dup_count / total_rows * 100, 1)
+        issues.append(f"{dup_count} duplicate rows ({pct}%)")
+
+    # 2. Per-column profiling
+    for i, header in enumerate(headers):
+        values = [r[i] if i < len(r) else None for r in rows]
+        non_empty = [v for v in values if v not in (None, "")]
+        null_count = total_rows - len(non_empty)
+        null_pct = round(null_count / total_rows * 100, 1) if total_rows > 0 else 0
+
+        # Null check
+        if null_pct > 20:
+            issues.append(f"'{header}': {null_pct}% empty cells")
+        elif null_pct > 0:
+            highlights.append(f"'{header}': {null_pct}% empty")
+
+        # Type consistency
+        num_count = 0
+        text_count = 0
+        for v in non_empty[:50]:
+            cleaned = re.sub(r"[^0-9.\-]", "", str(v))
+            if cleaned and re.fullmatch(r"-?\d+(\.\d+)?", cleaned):
+                num_count += 1
+            else:
+                text_count += 1
+
+        if num_count > 0 and text_count > 0 and len(non_empty) > 2:
+            num_pct = round(num_count / len(non_empty) * 100, 1)
+            issues.append(
+                f"'{header}': mixed types ({num_pct}% numeric, {round(100 - num_pct, 1)}% text)"
+            )
+
+        # Outlier detection (basic: values > 3 std dev from mean)
+        if num_count > 5:
+            nums = []
+            for v in non_empty[:100]:
+                try:
+                    nums.append(
+                        float(
+                            str(v)
+                            .replace(",", "")
+                            .replace("$", "")
+                            .replace("₹", "")
+                            .strip()
+                        )
+                    )
+                except:
+                    pass
+            if len(nums) > 5:
+                mean = sum(nums) / len(nums)
+                variance = sum((x - mean) ** 2 for x in nums) / len(nums)
+                std_dev = variance**0.5
+                if std_dev > 0:
+                    outlier_count = sum(1 for x in nums if abs(x - mean) > 3 * std_dev)
+                    if outlier_count > 0:
+                        highlights.append(
+                            f"'{header}': {outlier_count} potential outliers (>3σ)"
+                        )
+
+    # 3. Empty dataset check
+    if total_rows == 0:
+        issues.append("Dataset has no data rows (only headers)")
+
+    # Build summary
+    summary_parts = [f"DATA PROFILE: {total_rows} rows × {num_cols} columns"]
+
+    if issues:
+        summary_parts.append("ISSUES FOUND:")
+        for issue in issues[:8]:
+            summary_parts.append(f"  ⚠ {issue}")
+
+    if highlights:
+        summary_parts.append("NOTES:")
+        for h in highlights[:5]:
+            summary_parts.append(f"  ℹ {h}")
+
+    if not issues and not highlights:
+        summary_parts.append("Data looks clean — no major issues detected.")
+
+    return "\n".join(summary_parts)
 
 
 def compute_large_data_stats(data: List[List[Any]]) -> dict:
@@ -1397,6 +1540,7 @@ async def chat(req: ChatRequest):
         # Extract headers and schema context from selected_range for intelligent planning
         headers_context = ""
         schema_context = ""
+        data_profile = ""
         if req.selected_range:
             try:
                 import json
@@ -1421,6 +1565,8 @@ async def chat(req: ChatRequest):
                             headers_context = f"Sheet '{sheet_name}' columns ({len(header_names)}): {', '.join(header_names)}\nData range: {address}"
                         schema = build_table_schema(values)
                         schema_context = json.dumps(schema, ensure_ascii=False)
+                        # Deep data profiling for planner
+                        data_profile = profile_data(values)
             except Exception as e:
                 pass  # Keep silent if extraction fails
 
@@ -1513,6 +1659,59 @@ No asterisks or markdown.""",
         async def generate():
             yield f"data: {json.dumps({'type': 'reasoning', 'content': reasoning})}\n\n"
 
+            # Clarification Agent: detect ambiguous requests before planning
+            clarification_context = f"""User request: {req.message}
+{selected_info}
+{headers_context}
+Reasoning: {reasoning if reasoning else "No reasoning"}
+
+Is this request clear enough to create a plan, or does it need clarification?"""
+
+            try:
+                clarifier = Agent(
+                    role="Clarification Agent",
+                    goal="Detect ambiguous requests and ask clarifying questions instead of guessing",
+                    backstory=CLARIFICATION_PROMPT,
+                    verbose=False,
+                    allow_delegation=False,
+                    llm=model,
+                )
+
+                clarify_task = Task(
+                    description=clarification_context,
+                    expected_output="A JSON object with needs_clarification (bool) and optionally question (string).",
+                    agent=clarifier,
+                )
+
+                clarify_crew = Crew(
+                    agents=[clarifier],
+                    tasks=[clarify_task],
+                    process=Process.sequential,
+                    verbose=False,
+                )
+
+                clarify_result = clarify_crew.kickoff()
+                clarify_output = (
+                    str(clarify_result.raw)
+                    if hasattr(clarify_result, "raw")
+                    else str(clarify_result)
+                )
+
+                # Parse clarification response
+                clarify_json_match = re.search(r"\{.*\}", clarify_output, re.DOTALL)
+                if clarify_json_match:
+                    clarify_parsed = json.loads(clarify_json_match.group())
+                    if clarify_parsed.get("needs_clarification"):
+                        question = clarify_parsed.get(
+                            "question",
+                            "Could you be more specific about what you'd like me to do?",
+                        )
+                        yield f"data: {json.dumps({'type': 'clarification', 'content': question})}\n\n"
+                        return
+            except Exception as clarify_err:
+                print(f"Clarification agent error: {clarify_err}")
+                # Continue to planning if clarification fails
+
             planner = Agent(
                 role="Excel Task Planner",
                 goal="Create a precise, step-by-step JSON plan for Excel operations",
@@ -1529,6 +1728,7 @@ No asterisks or markdown.""",
                     selected_info=selected_info,
                     headers_context=headers_context,
                     schema_context=schema_context or "No schema available",
+                    data_profile=data_profile or "No data to profile",
                     memory_info=memory_info,
                     history_info=history_info,
                     reasoning_output=reasoning

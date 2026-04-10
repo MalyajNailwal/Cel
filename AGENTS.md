@@ -3,6 +3,9 @@
 
 ### Architecture
 
+<!-- lore:019d7740-6cd2-7dc8-9279-99fe9cd99683 -->
+* **Agent pipeline lacks clarification and adaptive execution**: Current Reasoning→Planner→Validator pipeline has two architectural gaps: (1) No clarification agent — ambiguous requests like 'clean the data' cause planner to guess blindly; a pre-planning clarification step for low-confidence intents would prevent wrong actions. (2) No adaptive executor — all plan steps execute sequentially without real-time adaptation; if step 3 fails, steps 4-7 still run and cascade. Reflection agent runs post-hoc, not during execution. These gaps directly impact outcome quality: wrong assumptions from ambiguity + cascading failures from blind execution.
+
 <!-- lore:019d6743-3189-7a6b-8909-7340f5976d0b -->
 * **Cel being positioned as SaaS product**: User views Cel through a SaaS lens, not just a personal tool. This affects architectural decisions: needs user auth, multi-tenant support, cloud storage, and billing eventually. Current localStorage approach is sufficient for now, but migration path to Convex or Supabase should be planned. Project already has Supabase available — prefer it over adding Convex unless Convex offers clear advantages for the specific use case.
 

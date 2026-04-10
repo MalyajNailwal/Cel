@@ -265,6 +265,18 @@ export default function App() {
                   responseContent = data.content;
                   setTimeout(scrollToBottom, 100);
                 }
+
+                if (data.type === 'clarification' && data.content) {
+                  // Clarification agent detected ambiguity — show question, stop processing
+                  setMessages((prev) => [...prev, {
+                    id: `clarify-${Date.now()}`,
+                    role: 'assistant',
+                    content: data.content,
+                  }]);
+                  setIsProcessing(false);
+                  setProcessingPhase('idle');
+                  return;
+                }
               } catch {}
             }
           }
@@ -1603,6 +1615,45 @@ export default function App() {
               // If table overlap error, add helpful message
               if (step.action === 'create_table' && lastError.toLowerCase().includes('overlap')) {
                 executionResults.push({ action: step.action, success: false, output: `Hint: A table already exists in "${params.address}". Delete the existing table first, then retry if needed.` });
+              }
+
+              // ADAPTIVE EXECUTOR: Check if failure is critical — halt remaining steps and re-plan
+              const isCritical = lastError.match(/sheet.*not found|not found|invalid range|does not exist|already deleted|excel is not ready/i);
+              const remainingSteps = validSteps.slice(i + 1);
+              if (isCritical && remainingSteps.length > 0) {
+                validationErrors.push(`Adaptive: Step ${i + 1} failed critically — halting ${remainingSteps.length} remaining step(s)`);
+                
+                // Trigger immediate reflection for remaining steps
+                if (apiKey) {
+                  try {
+                    setProcessingPhase('validating');
+                    const adaptiveReflect = await fetch('/api/reflect', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        message: userMessage,
+                        plan: remainingSteps,
+                        results: remainingSteps.map(s => ({ action: s.action, success: false, output: `Depends on failed step: ${step.action}` })),
+                        provider: settings.provider,
+                        model: effectiveModel,
+                        api_key: apiKey,
+                      }),
+                    });
+                    if (adaptiveReflect.ok) {
+                      const adaptiveData = await adaptiveReflect.json();
+                      const adaptiveRecovery = adaptiveData.recovery || [];
+                      for (const rec of adaptiveRecovery) {
+                        try {
+                          const recResult = await executeStep({ action: rec.action, params: rec.params, description: rec.description });
+                          executionResults.push({ action: rec.action, success: true, output: `Adaptive: ${recResult}` });
+                        } catch (recErr) {
+                          executionResults.push({ action: rec.action, success: false, output: `Adaptive recovery failed: ${recErr instanceof Error ? recErr.message : String(recErr)}` });
+                        }
+                      }
+                    }
+                  } catch {}
+                }
+                break; // Stop executing remaining steps
               }
             }
           } catch (error) {
