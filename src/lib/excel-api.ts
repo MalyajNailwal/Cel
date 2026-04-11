@@ -410,9 +410,28 @@ export async function sortRange(address: string, columnIndex: number, ascending:
     const sheet = sheetName
       ? context.workbook.worksheets.getItem(sheetName)
       : context.workbook.worksheets.getActiveWorksheet();
-    const range = sheet.getRange(address);
-    const sort = range.sort;
-    sort.apply([{ key: columnIndex, ascending }], false /*matchCase*/, true /*hasHeaders*/);
+    
+    // Parse the range to extract start/end row and column
+    const match = address.match(/^([A-Z]+)(\d+):([A-Z]+)(\d+)$/);
+    if (match) {
+      const [, startCol, startRowStr, endCol, endRowStr] = match;
+      const startRow = parseInt(startRowStr);
+      const endRow = parseInt(endRowStr);
+      
+      // If range has 2+ rows, sort only the data rows (skip header row)
+      if (endRow > startRow) {
+        const dataRange = sheet.getRange(`${startCol}${startRow + 1}:${endCol}${endRow}`);
+        dataRange.sort.apply([{ key: columnIndex, ascending }]);
+      } else {
+        // Single row range — nothing to sort
+        return;
+      }
+    } else {
+      // Fallback: use hasHeaders flag
+      const range = sheet.getRange(address);
+      range.sort.apply([{ key: columnIndex, ascending }]);
+    }
+    
     await context.sync();
   });
 }
