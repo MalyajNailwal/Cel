@@ -196,7 +196,7 @@ Reasoning analysis:
 Available actions: get_workbook_structure, get_selected_range, get_range, get_sheet_data,
 set_values, set_formulas, apply_format, insert_rows, delete_rows, insert_columns,
 delete_columns, add_worksheet, delete_worksheet, create_table, sort_range, auto_fill, create_chart,
-conditional_format, find_replace, merge_cells, unmerge_cells
+conditional_format, find_replace, merge_cells, unmerge_cells, add_dropdown
 
 IMPORTANT - For creating tables with sample data:
 - First use set_values to write the header row and data rows
@@ -228,6 +228,12 @@ IMPORTANT - FIND AND REPLACE:
 IMPORTANT - MERGE/UNMERGE CELLS:
 - When user says "merge these cells", "combine A1:D1" → use merge_cells with address
 - When user says "unmerge", "split merged cells" → use unmerge_cells with address
+
+IMPORTANT - DROPDOWNS:
+- When user says "add dropdown", "dropdown menu", "data validation", "choose from list" → use add_dropdown
+- Params: address (cell range, e.g., "B2:B100"), options (array of allowed values), sheet_name
+- Example: "dropdown in categories column with theif and not theif" → add_dropdown with address="B2:B100", options=["theif", "not theif"]
+- Example: "add a dropdown with yes/no options" → add_dropdown with address="A2:A100", options=["Yes", "No"]
 
 IMPORTANT - SORTING:
 - When user says "sort by X ascending/descending", "sort alphabetically", "sort A to Z" → use sort_range

@@ -407,9 +407,19 @@ export async function createTable(address: string, name: string, sheetName?: str
 
 export async function sortRange(address: string, columnIndex: number, ascending: boolean, sheetName?: string): Promise<void> {
   await Excel.run(async (context) => {
-    const sheet = sheetName
-      ? context.workbook.worksheets.getItem(sheetName)
-      : context.workbook.worksheets.getActiveWorksheet();
+    // Try to get the specific sheet, fall back to active sheet if not found
+    let sheet;
+    try {
+      sheet = sheetName
+        ? context.workbook.worksheets.getItem(sheetName)
+        : context.workbook.worksheets.getActiveWorksheet();
+      sheet.load('name');
+      await context.sync();
+    } catch {
+      sheet = context.workbook.worksheets.getActiveWorksheet();
+      await context.sync();
+      console.log('[sortRange] Sheet not found, using active sheet:', sheet.name);
+    }
     
     // Parse the range to extract start/end row and column
     const match = address.match(/^([A-Z]+)(\d+):([A-Z]+)(\d+)$/);
@@ -423,11 +433,9 @@ export async function sortRange(address: string, columnIndex: number, ascending:
         const dataRange = sheet.getRange(`${startCol}${startRow + 1}:${endCol}${endRow}`);
         dataRange.sort.apply([{ key: columnIndex, ascending }]);
       } else {
-        // Single row range — nothing to sort
         return;
       }
     } else {
-      // Fallback: use hasHeaders flag
       const range = sheet.getRange(address);
       range.sort.apply([{ key: columnIndex, ascending }]);
     }
@@ -850,6 +858,27 @@ export async function unmergeCells(address: string, sheetName?: string): Promise
       : context.workbook.worksheets.getActiveWorksheet();
     const range = sheet.getRange(address);
     range.unmerge();
+    await context.sync();
+  });
+}
+
+export async function addDropdown(
+  address: string,
+  options: string[],
+  sheetName?: string
+): Promise<void> {
+  await Excel.run(async (context) => {
+    const sheet = sheetName
+      ? context.workbook.worksheets.getItem(sheetName)
+      : context.workbook.worksheets.getActiveWorksheet();
+    const range = sheet.getRange(address);
+    const validation = range.dataValidation;
+    validation.rule = {
+      list: {
+        inCellDropDown: true,
+        source: options.join(','),
+      },
+    };
     await context.sync();
   });
 }

@@ -29,6 +29,9 @@
 <!-- lore:019d717e-f4b5-7108-86f4-3d75ed1623aa -->
 * **Chart X-axis shows row numbers instead of labels**: Chart X-axis shows row numbers: createChart (excel-api.ts:510) and createChartFromTwoColumns (line 652) still use seriesBy: 'Columns' not 'Auto'. The setCategoryLabels fix WAS applied to createChartFromTwoColumns (lines 655-659) but the seriesBy change was never applied. Fix: Change 'Columns' to Excel.ChartSeriesBy.auto in BOTH functions.
 
+<!-- lore:019d7b57-6826-789d-bae4-93e1cf9b9bf5 -->
+* **Office.js sort hasHeaders flag unreliable - exclude header row manually**: Office.js sort API's \`hasHeaders: true\` parameter doesn't work reliably in all Excel versions, causing the header row to be included in sort and reversing expected order. Fix: parse range address (e.g., 'A1:B4'), create new range starting from row 2 (e.g., 'A2:B4'), sort only data rows. This excludes header entirely and ensures predictable A-Z sorting.
+
 <!-- lore:019d71e9-8663-7e65-b570-7e71a0603566 -->
 * **Pie charts fail without data aggregation - need category sums not raw rows**: Pie charts require aggregated data (sum by category), but current code passes raw row data (e.g., C1:C9, E1:E9). For 'Sales by Category', need: Electronics=2700, Fashion=1250, Accessories=950—not individual rows. Fix: Before creating pie charts, aggregate data by summing numeric column for each unique category value, write aggregated summary to helper cells, then create pie chart from aggregated range.
 

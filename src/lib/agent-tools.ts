@@ -369,6 +369,22 @@ export const excelTools = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'add_dropdown',
+      description: 'Add a dropdown list (data validation) to cells for selecting from predefined options.',
+      parameters: {
+        type: 'object',
+        properties: {
+          address: { type: 'string', description: 'Cell range for dropdown (e.g., "B2:B100")' },
+          options: { type: 'array', items: { type: 'string' }, description: 'List of allowed options' },
+          sheet_name: { type: 'string', description: 'Sheet name (optional)' },
+        },
+        required: ['address', 'options'],
+      },
+    },
+  },
 ];
 
 const toolMap: Record<string, (...args: any[]) => Promise<any>> = {
@@ -436,6 +452,8 @@ const toolMap: Record<string, (...args: any[]) => Promise<any>> = {
     ExcelAPI.mergeCells(args.address, args.sheet_name),
   unmerge_cells: (args: { address: string; sheet_name?: string }) =>
     ExcelAPI.unmergeCells(args.address, args.sheet_name),
+  add_dropdown: (args: { address: string; options: string[]; sheet_name?: string }) =>
+    ExcelAPI.addDropdown(args.address, args.options, args.sheet_name),
 };
 
 export async function executeToolCall(toolCall: ToolCall): Promise<string> {

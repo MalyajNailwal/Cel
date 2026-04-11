@@ -2004,6 +2004,7 @@ async function executeStep(step: { action: string; params: Record<string, any>; 
     }
     case 'merge_cells': await ExcelAPI.mergeCells(params.address, params.sheet_name); return `Merged cells ${params.address}`;
     case 'unmerge_cells': await ExcelAPI.unmergeCells(params.address, params.sheet_name); return `Unmerged cells ${params.address}`;
+    case 'add_dropdown': await ExcelAPI.addDropdown(params.address, params.options, params.sheet_name); return `Added dropdown to ${params.address} with options: ${params.options.join(', ')}`;
     default: throw new Error(`Unknown action: ${action}`);
   }
 }
@@ -2057,7 +2058,7 @@ async function getSelectedRangeData(): Promise<string | null> {
 function validatePlan(plan: { action: string; params: Record<string, any>; description: string }[], userMessage: string = ''): { validSteps: { action: string; params: Record<string, any>; description: string }[]; validationErrors: string[] } {
   const validSteps: { action: string; params: Record<string, any>; description: string }[] = [];
   const validationErrors: string[] = [];
-  const VALID_ACTIONS = new Set(['get_workbook_structure', 'get_selected_range', 'get_range', 'get_sheet_data', 'set_values', 'set_formulas', 'apply_format', 'insert_rows', 'delete_rows', 'insert_columns', 'delete_columns', 'add_worksheet', 'delete_worksheet', 'create_table', 'sort_range', 'auto_fill', 'create_chart', 'conditional_format', 'find_replace', 'merge_cells', 'unmerge_cells']);
+  const VALID_ACTIONS = new Set(['get_workbook_structure', 'get_selected_range', 'get_range', 'get_sheet_data', 'set_values', 'set_formulas', 'apply_format', 'insert_rows', 'delete_rows', 'insert_columns', 'delete_columns', 'add_worksheet', 'delete_worksheet', 'create_table', 'sort_range', 'auto_fill', 'create_chart', 'conditional_format', 'find_replace', 'merge_cells', 'unmerge_cells', 'add_dropdown']);
   for (let i = 0; i < plan.length; i++) {
     const step = plan[i];
     if (!VALID_ACTIONS.has(step.action)) { validationErrors.push(`Step ${i + 1}: Unknown action "${step.action}" — skipping`); continue; }
