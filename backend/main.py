@@ -229,6 +229,13 @@ IMPORTANT - MERGE/UNMERGE CELLS:
 - When user says "merge these cells", "combine A1:D1" → use merge_cells with address
 - When user says "unmerge", "split merged cells" → use unmerge_cells with address
 
+IMPORTANT - SORTING:
+- When user says "sort by X ascending/descending", "sort alphabetically", "sort A to Z" → use sort_range
+- Params: address (full data range including header row, e.g., "A1:B4"), column_index (0-based index of sort column), ascending (true for A-Z/ascending, false for Z-A/descending)
+- Example: "sort by name ascending" on range A1:B4 → sort_range with address="A1:B4", column_index=0, ascending=true
+- Example: "sort salary descending" → sort_range with column_index=(index of Salary column), ascending=false
+- The API handles header row automatically — first row stays as header during sort
+
 For charts (create_chart), use these params:
 - chart_type: "column", "bar", "line", "pie", "pie3D", "doughnut", "area", "scatter", "radar", "surface", "bubble"
 - data_range: A1 notation range that contains the data (e.g., "A1:B10")

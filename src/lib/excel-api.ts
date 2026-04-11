@@ -412,7 +412,7 @@ export async function sortRange(address: string, columnIndex: number, ascending:
       : context.workbook.worksheets.getActiveWorksheet();
     const range = sheet.getRange(address);
     const sort = range.sort;
-    sort.apply([{ key: columnIndex, ascending }]);
+    sort.apply([{ key: columnIndex, ascending }], false /*matchCase*/, true /*hasHeaders*/);
     await context.sync();
   });
 }
