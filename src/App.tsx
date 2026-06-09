@@ -172,6 +172,8 @@ export default function App() {
         setProcessingPhase('context');
         const workbookContext = await getWorkbookContext();
         const selectedRangeData = await getSelectedRangeData();
+        const workbookMetadata = await getWorkbookMetadata();
+        const enrichedMetadata = await prescanReferencedSheets(userMessage, workbookMetadata);
 
         // Resource-aware: Use user's model as-is - truly dynamic, works with ANY model
         const effectiveModel = settings.model;
@@ -193,12 +195,13 @@ export default function App() {
             api_key: apiKey,
             workbook_context: workbookContext,
             selected_range: selectedRangeData,
+            workbook_metadata: enrichedMetadata || workbookMetadata,
             memory_context: getMemoryContext(),
             enable_reasoning: reasoningEnabled,
             conversation_history: messagesRef.current
               .filter(m => m.role === 'user' || m.role === 'assistant')
-              .slice(-6)  // Last 3 exchanges
-              .map(m => ({ role: m.role, content: m.content.slice(0, 500) })),
+              .slice(-10)  // Last 5 exchanges
+              .map(m => ({ role: m.role, content: m.content.slice(0, 800) })),
           }),
         });
 
@@ -374,16 +377,11 @@ export default function App() {
           }
         }
 
-        // Check if user wants data analysis
+        // Check if user wants data analysis (charts now go through /api/chat agent pipeline)
         const analysisKeywords = /analyze|analysis|statistics|stats|trends|insights|outliers|distribution|compare/i;
-        const chartKeywords = /chart|graph|plot|visual|pie|bar|line|trend/i;
         const isAnalysisRequest = analysisKeywords.test(userMessage);
-        const isChartRequest = chartKeywords.test(userMessage);
-        const isPieRequest = /pie\s*chart/i.test(userMessage);
-        const isBarRequest = /bar\s*(graph|chart)/i.test(userMessage);
-        const isLineRequest = /line\s*chart|trend/i.test(userMessage);
 
-        if ((isAnalysisRequest || isChartRequest) && selectedRangeData) {
+        if (isAnalysisRequest && selectedRangeData) {
           setProcessingPhase('context');
           let selectedData = null;
           try {
@@ -431,455 +429,6 @@ export default function App() {
                 analysisResult = await analyzeResponse.json();
               }
             }
-
-            if (isChartRequest && selectedRangeData) {
-                try {
-                  const sr = JSON.parse(selectedRangeData);
-                  let headers = selectedData[0] || [];
-                  let rows = selectedData.slice(1);
-                  let address = sr.address;
-                  const sheetName = sr.sheetName;
-                  let chartsCreated = 0;
-                  let chartDesc = '';
-
-                  const userMsg = userMessage.toLowerCase();
-
-                  const addrParts = address.split('!');
-                  const rangePart = addrParts.length > 1 ? addrParts[1] : addrParts[0];
-                  const rangeCells = rangePart.split(':');
-                  const startCell = rangeCells[0];
-                  const endCell = rangeCells.length > 1 ? rangeCells[1] : rangeCells[0];
-                  const startColMatch = startCell.match(/^([A-Z]+)/);
-                  const startColLabel = startColMatch ? startColMatch[1] : 'A';
-                  const colLabelToIndex = (label: string): number => {
-                    return label.toUpperCase().split('').reduce((acc, ch) => acc * 26 + (ch.charCodeAt(0) - 64), 0) - 1;
-                  };
-                  const indexToColLabel = (idx: number): string => {
-                    let n = idx + 1;
-                    let out = '';
-                    while (n > 0) {
-                      const rem = (n - 1) % 26;
-                      out = String.fromCharCode(65 + rem) + out;
-                      n = Math.floor((n - 1) / 26);
-                    }
-                    return out;
-                  };
-                  const startColIdx = colLabelToIndex(startColLabel);
-                  const numCols = headers.length;
-
-                  // Build column profiles from the selected range (dynamic for any table shape).
-                  const numericCols: number[] = [];
-                  const categoricalCols: number[] = [];
-                  const colScores: number[] = Array(headers.length).fill(0);
-                  const headerNorms = headers.map((h: any) => String(h ?? '').trim().toLowerCase());
-                  const tokenize = (s: string) => s.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
-                  
-                  for (let i = 0; i < headers.length; i++) {
-                    let numCount = 0;
-                    let catCount = 0;
-                    const sampleSize = Math.min(10, rows.length);
-                    
-                    for (let j = 0; j < sampleSize; j++) {
-                      const val = rows[j]?.[i];
-                      if (val === undefined || val === null || val === '') continue;
-                      const strVal = String(val).replace(/[^0-9.-]/g, '');
-                      if (!isNaN(Number(strVal)) && strVal !== '') {
-                        numCount++;
-                      } else {
-                        catCount++;
-                      }
-                    }
-                    
-                    if (numCount > catCount) numericCols.push(i);
-                    else categoricalCols.push(i);
-                  }
-
-                  // Dynamic intent extraction: explicit matches > phrase-level mapping > fuzzy token fallback.
-                  let userMentionedCols: number[] = [];
-                  const userMsgLower = userMessage.toLowerCase();
-                  const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                  
-                  // Extract column names from user message - remove common words
-                  const skipWords = ['bar', 'graph', 'chart', 'pie', 'line', 'make', 'create', 'show', 'display', 'the', 'a', 'an', 'of', 'to', 'for', 'between', 'with', 'on', 'in', 'and', 'vs', 'versus', 'column', 'columns'];
-                  const userWords = userMsgLower.split(/\s+/).filter(w => !skipWords.includes(w) && w.length > 1);
-                  const mentionedSet = new Set<number>();
-
-                  // Strongest signal: exact header names in the prompt.
-                  // If user says "product and quantity", we should lock onto those columns.
-                  const explicitHeaderSet = new Set<number>();
-                  for (let i = 0; i < headers.length; i++) {
-                    const rawHeader = String(headers[i] ?? '').trim().toLowerCase();
-                    if (!rawHeader) continue;
-                    const exactHeaderRegex = new RegExp(`\\b${escapeRegExp(rawHeader)}\\b`, 'i');
-                    if (exactHeaderRegex.test(userMsgLower)) {
-                      explicitHeaderSet.add(i);
-                      mentionedSet.add(i);
-                      colScores[i] += 5;
-                    }
-                  }
-
-                  // Handle explicit Excel column letters only in explicit column-reference phrases.
-                  // Examples: "column b and d", "b, d columns", "columns aa and ac".
-                  const explicitColumnTokens = new Set<string>();
-                  const forwardPattern = /\bcolumn[s]?\s+([a-z]{1,3}(?:\s*(?:,|and|&)\s*[a-z]{1,3})*)\b/gi;
-                  const reversePattern = /\b([a-z]{1,3}(?:\s*(?:,|and|&)\s*[a-z]{1,3})+)\s+column[s]?\b/gi;
-
-                  const collectColumnTokens = (groupText: string) => {
-                    const tokens = groupText
-                      .split(/\s*(?:,|and|&)\s*/i)
-                      .map((t) => t.trim().toLowerCase())
-                      .filter((t) => /^[a-z]{1,3}$/.test(t));
-                    for (const t of tokens) explicitColumnTokens.add(t);
-                  };
-
-                  let patternMatch: RegExpExecArray | null;
-                  while ((patternMatch = forwardPattern.exec(userMsgLower)) !== null) {
-                    collectColumnTokens(patternMatch[1]);
-                  }
-                  while ((patternMatch = reversePattern.exec(userMsgLower)) !== null) {
-                    collectColumnTokens(patternMatch[1]);
-                  }
-
-                  for (const token of explicitColumnTokens) {
-                    const absoluteIdx = colLabelToIndex(token.toUpperCase());
-                    const relativeIdx = absoluteIdx - startColIdx;
-                    if (relativeIdx >= 0 && relativeIdx < headers.length) {
-                      mentionedSet.add(relativeIdx);
-                      colScores[relativeIdx] += 4;
-                    }
-                  }
-
-                  const phraseMatch = userMsgLower.match(
-                    /(?:for|plot|graph|chart)\s+(.+?)(?:\s+(?:and|vs|versus|by)\s+)(.+?)(?:$|[,.!?])/
-                  );
-                  const requestedTerms: string[] = [];
-                  if (phraseMatch) {
-                    requestedTerms.push(phraseMatch[1].trim(), phraseMatch[2].trim());
-                  }
-
-                  const scoreHeaderMatch = (header: string, term: string): number => {
-                    if (!header || !term) return 0;
-                    const h = header.toLowerCase().trim();
-                    const t = term.toLowerCase().trim();
-                    if (h === t) return 1.0;
-                    if (h.includes(t) || t.includes(h)) return 0.85;
-                    const hTokens = tokenize(h);
-                    const tTokens = tokenize(t);
-                    if (!hTokens.length || !tTokens.length) return 0;
-                    const overlap = hTokens.filter((tok) => tTokens.includes(tok)).length;
-                    if (!overlap) return 0;
-                    return overlap / Math.max(hTokens.length, tTokens.length);
-                  };
-
-                  const resolveBestColForTerm = (term: string): number | null => {
-                    let bestIdx: number | null = null;
-                    let bestScore = 0;
-                    for (let i = 0; i < headerNorms.length; i++) {
-                      const s = scoreHeaderMatch(headerNorms[i], term);
-                      if (s > bestScore) {
-                        bestScore = s;
-                        bestIdx = i;
-                      }
-                    }
-                    return bestScore >= 0.55 ? bestIdx : null;
-                  };
-
-                  for (const term of requestedTerms) {
-                    const idx = resolveBestColForTerm(term);
-                    if (idx !== null) {
-                      mentionedSet.add(idx);
-                      colScores[idx] += 3;
-                    }
-                  }
-                  
-                  // Match each user word against actual headers
-                  for (let i = 0; i < headers.length; i++) {
-                    const h = headers[i].toLowerCase();
-                    for (const userWord of userWords) {
-                      // Fuzzy match: header contains word OR word matches part of header
-                      if (h.includes(userWord) || userWord.includes(h) || 
-                          h.split(/\s+/).some((hw: string) => hw.startsWith(userWord.slice(0, 3)) || userWord.startsWith(hw.slice(0, 3)))) {
-                        mentionedSet.add(i);
-                        colScores[i] += 1;
-                        break;
-                      }
-                    }
-                  }
-                  userMentionedCols = Array.from(mentionedSet).sort((a, b) => colScores[b] - colScores[a]);
-
-                  // Dynamic AI-recommended column extraction - match column names from analysis
-                  let aiRecommendedCols: number[] = [];
-                  if (analysisResult.analysis) {
-                    const analysisText = analysisResult.analysis.toLowerCase();
-                    
-                    // Look for "X vs Y" or "X and Y" patterns for chart recommendations
-                    const vsMatch = analysisText.match(/(?:vs|versus|and|by)\s+([a-z\s]+?)(?:\s+(?:would|make|good|best)|$)/i);
-                    if (vsMatch) {
-                      const targetCol = vsMatch[1].trim().toLowerCase();
-                      for (let i = 0; i < headers.length; i++) {
-                        const h = headers[i].toLowerCase();
-                        if (h.includes(targetCol) || targetCol.includes(h)) {
-                          aiRecommendedCols.push(i);
-                        }
-                      }
-                    }
-                    
-                    // If no vs pattern, find any column names mentioned in analysis
-                    if (aiRecommendedCols.length < 2) {
-                      for (let i = 0; i < headers.length; i++) {
-                        const h = headers[i].toLowerCase();
-                        const words = h.split(/\s+/).filter((w: string) => w.length > 2);
-                        for (const word of words) {
-                          if (analysisText.includes(word) && !aiRecommendedCols.includes(i)) {
-                            aiRecommendedCols.push(i);
-                            break;
-                          }
-                        }
-                        if (aiRecommendedCols.length >= 2) break;
-                      }
-                    }
-                  }
-
-                  // Backend-authoritative intent resolution (scalable source of truth).
-                  setProcessingPhase('intent');
-                  let backendResolvedCols: number[] = [];
-                  let backendChartRequests: { chart_type: string; x_col_index: number; y_col_index: number; x_header?: string; y_header?: string }[] = [];
-                  let backendNeedsClarification = false;
-                  let backendClarificationReason = '';
-                  let backendClarificationQuestion = '';
-                  try {
-                    const intentRes = await fetch('/api/resolve-chart-intent', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({
-                        data: selectedData,
-                        question: userMessage,
-                        headers,
-                        start_col_index: startColIdx,
-                      }),
-                    });
-                    if (intentRes.ok) {
-                      const intent = await intentRes.json();
-                      if (Array.isArray(intent.chart_requests)) {
-                        backendChartRequests = intent.chart_requests
-                          .filter((r: any) => typeof r?.x_col_index === 'number' && typeof r?.y_col_index === 'number')
-                          .map((r: any) => ({
-                            chart_type: typeof r?.chart_type === 'string' ? r.chart_type : 'column',
-                            x_col_index: r.x_col_index,
-                            y_col_index: r.y_col_index,
-                            x_header: r.x_header,
-                            y_header: r.y_header,
-                          }));
-                      }
-                      if (typeof intent.x_col_index === 'number' && typeof intent.y_col_index === 'number') {
-                        backendResolvedCols = [intent.x_col_index, intent.y_col_index];
-                      }
-                      backendNeedsClarification =
-                        !!intent.needs_clarification &&
-                        backendResolvedCols.length < 2 &&
-                        backendChartRequests.length === 0;
-                      backendClarificationReason = intent.reason || '';
-                      backendClarificationQuestion = intent.clarification_question || '';
-                    }
-                  } catch {}
-
-                  if (backendNeedsClarification) {
-                    const aiMsg: ExtendedMessage = {
-                      id: `msg-${Date.now()}`,
-                      role: 'assistant',
-                      content: `${analysisResult.analysis || 'Analysis complete.'}\n\nI need a quick clarification before charting: ${backendClarificationQuestion || backendClarificationReason || 'Please confirm which two columns to use (for example: "Product and Quantity" or "columns B and D").'}`,
-                    };
-                    setMessages((prev) => [...prev, aiMsg]);
-                    setIsProcessing(false);
-                    setProcessingPhase('idle');
-                    return;
-                  }
-
-                  setProcessingPhase('planning');
-                  const startRow = startCell.match(/\d+/)?.[0] || '1';
-                  const endRow = endCell.match(/(\d+)$/)?.[1] || '100';
-
-                  const createChartForColumn = async (colIdx: number, chartType: string, title: string) => {
-                    const colLetter = indexToColLabel(startColIdx + colIdx);
-                    const chartRange = `${colLetter}${startRow}:${colLetter}${endRow}`;
-                    await ExcelAPI.createChart(chartType, chartRange, sheetName, title);
-                    chartsCreated++;
-                    chartDesc += `📊 ${chartType} chart: ${title}\n`;
-                  };
-
-                  const createChartWithTwoColumns = async (col1Idx: number, col2Idx: number, chartType: string, title: string) => {
-                    const firstLetter = indexToColLabel(startColIdx + col1Idx);
-                    const secondLetter = indexToColLabel(startColIdx + col2Idx);
-                    const firstRange = `${firstLetter}${startRow}:${firstLetter}${endRow}`;
-                    const secondRange = `${secondLetter}${startRow}:${secondLetter}${endRow}`;
-                    await ExcelAPI.createChartFromTwoColumns(chartType, firstRange, secondRange, sheetName, title);
-                    chartsCreated++;
-                    chartDesc += `📊 ${chartType} chart: ${title}\n`;
-                  };
-
-                  const createdChartMappings: { x_header: string; y_header: string; chart_type: string }[] = [];
-                  setProcessingPhase('executing');
-
-                  if (backendChartRequests.length > 0) {
-                    for (const req of backendChartRequests) {
-                      const xIdx = req.x_col_index;
-                      const yIdx = req.y_col_index;
-                      if (xIdx < 0 || yIdx < 0 || xIdx >= headers.length || yIdx >= headers.length || xIdx === yIdx) continue;
-                      const chartType = req.chart_type || (isPieRequest ? 'pie' : isLineRequest ? 'line' : 'column');
-                      const xHeader = req.x_header || headers[xIdx];
-                      const yHeader = req.y_header || headers[yIdx];
-                      const title =
-                        chartType === 'line'
-                          ? `${yHeader} Trend by ${xHeader}`
-                          : `${yHeader} by ${xHeader}`;
-                      await createChartWithTwoColumns(xIdx, yIdx, chartType, title);
-                      createdChartMappings.push({ x_header: String(xHeader), y_header: String(yHeader), chart_type: chartType });
-                    }
-                  }
-
-                  // Priority contract:
-                  // 1) explicit header mentions, 2) high-confidence user intent mapping, 3) AI fallback.
-                  const explicitHeaderCols = Array.from(explicitHeaderSet);
-                  const confidentUserCols = userMentionedCols.filter((c) => colScores[c] >= 3);
-                  const effectiveCols =
-                    backendResolvedCols.length >= 2 ? backendResolvedCols :
-                    explicitHeaderCols.length >= 2 ? explicitHeaderCols :
-                    confidentUserCols.length >= 2 ? confidentUserCols :
-                    userMentionedCols.length >= 2 ? userMentionedCols :
-                    aiRecommendedCols.length >= 2 ? aiRecommendedCols : [];
-
-                  // If user clearly asked for two fields but we couldn't resolve both confidently,
-                  // ask for clarification instead of guessing wrong columns.
-                  if (requestedTerms.length >= 2 && effectiveCols.length < 2) {
-                    const aiMsg: ExtendedMessage = {
-                      id: `msg-${Date.now()}`,
-                      role: 'assistant',
-                      content: `I could not confidently map both columns from "${requestedTerms[0]}" and "${requestedTerms[1]}". Please confirm the two columns (for example: "Product and Quantity" or "columns B and D").`,
-                    };
-                    setMessages((prev) => [...prev, aiMsg]);
-                    setIsProcessing(false);
-                    setProcessingPhase('idle');
-                    return;
-                  }
-
-                  if (chartsCreated === 0 && effectiveCols.length >= 2) {
-                    const catCol = effectiveCols.find(c => categoricalCols.includes(c)) ?? effectiveCols[0];
-                    const numCol = effectiveCols.find(c => numericCols.includes(c)) ?? effectiveCols[1];
-                    if (isPieRequest) {
-                      await createChartWithTwoColumns(catCol, numCol, 'pie', `${headers[catCol]} vs ${headers[numCol]}`);
-                      createdChartMappings.push({ x_header: String(headers[catCol]), y_header: String(headers[numCol]), chart_type: 'pie' });
-                    } else if (isBarRequest) {
-                      await createChartWithTwoColumns(catCol, numCol, 'column', `${headers[numCol]} by ${headers[catCol]}`);
-                      createdChartMappings.push({ x_header: String(headers[catCol]), y_header: String(headers[numCol]), chart_type: 'column' });
-                    } else if (isLineRequest) {
-                      await createChartWithTwoColumns(catCol, numCol, 'line', `${headers[numCol]} Trend`);
-                      createdChartMappings.push({ x_header: String(headers[catCol]), y_header: String(headers[numCol]), chart_type: 'line' });
-                    } else {
-                      await createChartWithTwoColumns(catCol, numCol, 'column', `${headers[numCol]} by ${headers[catCol]}`);
-                      createdChartMappings.push({ x_header: String(headers[catCol]), y_header: String(headers[numCol]), chart_type: 'column' });
-                    }
-                  } else if (chartsCreated === 0 && isPieRequest) {
-                    if (categoricalCols.length > 0 && numericCols.length > 0) {
-                      await createChartWithTwoColumns(categoricalCols[0], numericCols[0], 'pie', `${headers[categoricalCols[0]]} Distribution`);
-                    } else if (categoricalCols.length > 0 && numCols >= 2) {
-                      await createChartWithTwoColumns(categoricalCols[0], 0, 'pie', `${headers[categoricalCols[0]]} Count`);
-                    } else if (numCols >= 2) {
-                      await createChartWithTwoColumns(0, 1, 'pie', `${headers[0]} Distribution`);
-                    } else {
-                      await createChartForColumn(0, 'pie', `${headers[0]} Distribution`);
-                    }
-                  } else if (chartsCreated === 0 && isBarRequest) {
-                    if (numericCols.length > 0 && categoricalCols.length > 0) {
-                      await createChartWithTwoColumns(categoricalCols[0], numericCols[0], 'column', `${headers[numericCols[0]]} by ${headers[categoricalCols[0]]}`);
-                    } else if (numericCols.length > 0) {
-                      await createChartForColumn(numericCols[0], 'column', `${headers[numericCols[0]]} Distribution`);
-                    } else if (numCols >= 2) {
-                      await createChartWithTwoColumns(0, 1, 'column', `${headers[1]} Distribution`);
-                    } else {
-                      await createChartForColumn(0, 'column', `${headers[0]} Distribution`);
-                    }
-                  } else if (chartsCreated === 0 && isLineRequest) {
-                    if (numericCols.length > 0 && categoricalCols.length > 0) {
-                      await createChartWithTwoColumns(categoricalCols[0], numericCols[0], 'line', `${headers[numericCols[0]]} Trend`);
-                    } else if (numericCols.length > 0 && numCols >= 2) {
-                      await createChartWithTwoColumns(0, numericCols[0], 'line', `${headers[numericCols[0]]} Trend`);
-                    } else if (numericCols.length > 0) {
-                      await createChartForColumn(numericCols[0], 'line', `${headers[numericCols[0]]} Trend`);
-                    } else if (numCols >= 2) {
-                      await createChartWithTwoColumns(0, 1, 'line', `${headers[1]} Trend`);
-                    } else {
-                      await createChartForColumn(0, 'line', `${headers[0]} Trend`);
-                    }
-                  } else if (chartsCreated === 0) {
-                    if (numericCols.length > 0 && categoricalCols.length > 0) {
-                      await createChartWithTwoColumns(categoricalCols[0], numericCols[0], 'column', `${headers[numericCols[0]]} by ${headers[categoricalCols[0]]}`);
-                    } else if (numericCols.length > 0) {
-                      await createChartForColumn(numericCols[0], 'line', `${headers[numericCols[0]]} Trend`);
-                    } else if (categoricalCols.length > 0) {
-                      await createChartForColumn(categoricalCols[0], 'column', `${headers[categoricalCols[0]]} Count`);
-                    } else if (numCols >= 2) {
-                      await createChartWithTwoColumns(0, 1, 'column', `${headers[1]} Distribution`);
-                    } else {
-                      await createChartForColumn(0, 'column', 'Data Chart');
-                    }
-                  }
-
-                  if (chartsCreated === 0) {
-                    await ExcelAPI.createChart('column', address, sheetName, 'Data Chart');
-                    chartsCreated++;
-                    chartDesc = `📊 Chart created on ${sheetName}`;
-                  }
-
-                  const expectedMappings = backendChartRequests.length > 0
-                    ? backendChartRequests.map((r) => ({
-                        x_header: String(r.x_header || headers[r.x_col_index] || ''),
-                        y_header: String(r.y_header || headers[r.y_col_index] || ''),
-                        chart_type: r.chart_type || 'column',
-                      }))
-                    : createdChartMappings;
-                  let verificationNote = '';
-                  if (expectedMappings.length > 0 && createdChartMappings.length > 0) {
-                    setProcessingPhase('verifying');
-                    try {
-                      const verifyRes = await fetch('/api/verify-chart-execution', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                          request_message: userMessage,
-                          expected_charts: expectedMappings,
-                          created_charts: createdChartMappings,
-                        }),
-                      });
-                      if (verifyRes.ok) {
-                        const verify = await verifyRes.json();
-                        verificationNote = verify.ok
-                          ? `\n✅ Verification: ${verify.message}`
-                          : `\n⚠️ Verification: ${verify.message}`;
-                      }
-                    } catch {}
-                  }
-
-                  const aiMsg: ExtendedMessage = {
-                    id: `msg-${Date.now()}`,
-                    role: 'assistant',
-                    content: `${analysisResult.analysis || 'Analysis complete.'}\n\n${chartDesc}${verificationNote}`,
-                  };
-                  setMessages((prev) => [...prev, aiMsg]);
-                  setIsProcessing(false);
-                  setProcessingPhase('idle');
-                  return;
-                } catch (chartErr: any) {
-                  const aiMsg: ExtendedMessage = {
-                    id: `msg-${Date.now()}`,
-                    role: 'assistant',
-                    content: `${analysisResult.analysis || 'Analysis complete.'}\n\n⚠️ Chart creation failed: ${chartErr.message}`,
-                  };
-                  setMessages((prev) => [...prev, aiMsg]);
-                  setIsProcessing(false);
-                  setProcessingPhase('idle');
-                  return;
-                }
-              }
 
               if (isAnalysisRequest) {
               const aiMsg: ExtendedMessage = {
@@ -955,11 +504,13 @@ export default function App() {
           }
         }
 
-        // Pre-execution Review: Show plan in chat (no modal confirmation for scale)
-        const planSummary = plan.map((s: any, idx: number) => 
-          `${idx + 1}. ${s.action}${s.params?.address ? ` (${s.params.address})` : ''}: ${s.description || ''}`
-        ).join('\n');
-        validationErrors.push(`Plan: ${planSummary}`);
+        // Pre-execution Review: Show plan in chat with confidence levels
+        const planSummary = plan.map((s: any, idx: number) => {
+          const conf = s.confidence !== undefined ? `[${(s.confidence * 100).toFixed(0)}%]` : '';
+          const confIcon = s.confidence >= 0.80 ? '' : s.confidence >= 0.50 ? ' ~' : ' !';
+          return `${idx + 1}. ${conf}${confIcon} ${s.action}${s.params?.address ? ` (${s.params.address})` : ''}: ${s.description || ''}`;
+        }).join('\n');
+        validationErrors.push(`Planned Actions:\n${planSummary}`);
 
         // Error Detection: Check for potential Excel errors before execution
         const potentialErrors: string[] = [];
@@ -1024,6 +575,37 @@ export default function App() {
           validationErrors.push(...potentialErrors.map(e => `Warning: ${e}`));
         }
 
+        // Confidence-Based Execution: Check plan step confidence levels
+        const lowConfidenceSteps = plan.filter((s: any) => s.confidence !== undefined && s.confidence < 0.50);
+        const mediumConfidenceSteps = plan.filter((s: any) => s.confidence !== undefined && s.confidence >= 0.50 && s.confidence < 0.80);
+
+        if (lowConfidenceSteps.length > 0) {
+          const lowSummary = lowConfidenceSteps.map((s: any, i: number) =>
+            `${i + 1}. [${(s.confidence * 100).toFixed(0)}%] ${s.action}: ${s.description || ''}`
+          ).join('\n');
+          setProcessingPhase('confirming');
+          const confirmLow = await confirm(
+            `I'm uncertain about ${lowConfidenceSteps.length} step(s):\n${lowSummary}\n\nThese may not do what you expect. Continue?`,
+            { title: 'Low Confidence Steps', confirmVariant: 'warning', confirmLabel: 'Execute Anyway' }
+          );
+          if (!confirmLow) {
+            setMessages((prev) => [...prev, {
+              id: `ai-${Date.now()}`,
+              role: 'assistant',
+              content: 'Operation cancelled. Try rephrasing your request for better results.',
+            }]);
+            setIsProcessing(false);
+            setProcessingPhase('idle');
+            return;
+          }
+        } else if (mediumConfidenceSteps.length > 0) {
+          // Auto-execute medium confidence but show info
+          const medSummary = mediumConfidenceSteps.map((s: any) =>
+            `  - ${s.action}: ${s.description || ''}`
+          ).join('\n');
+          validationErrors.push(`Medium confidence steps (auto-executing):\n${medSummary}`);
+        }
+
         setProcessingPhase('executing');
         const executionResults: { action: string; success: boolean; output: string }[] = [];
         let lastCreatedSheet: string | null = null;
@@ -1069,18 +651,39 @@ export default function App() {
           // CRITICAL: Force selected range for write operations when user refers to selection
           console.log('[EXECUTION] Final check - userWantsSelected:', userWantsSelected, '| react selectedRange state:', selectedRange, '| step.action:', step.action, '| original params:', { address: params.address, sheet_name: params.sheet_name });
           if (userWantsSelected && selectedRange) {
-            const writeActions = ['set_values', 'set_formulas', 'apply_format', 'create_chart', 'create_table', 'sort_range', 'auto_fill'];
-            if (writeActions.includes(step.action)) {
-              console.log('[EXECUTION] Overwriting params with selected range:', selectedRange.address, selectedRange.sheetName);
-              // ALWAYS force to selected sheet and address for "put here" type requests
-              params.address = selectedRange.address;
-              params.sheet_name = selectedRange.sheetName;
-              validationErrors.push(`Step ${i + 1}: Using selected range "${selectedRange.address}" in "${selectedRange.sheetName}"`);
+            const writeActions = ['set_values', 'apply_format', 'create_table', 'sort_range', 'auto_fill'];
+
+            // SMARTER OVERRIDE: Don't override formulas (they reference specific ranges)
+            // Don't override if planner already chose the selected range
+            // Don't override cross-sheet operations
+            const plannerAddress = params.address || '';
+            const plannerSheet = params.sheet_name || '';
+            const selectedAddr = selectedRange.address;
+            const selectedSheet = selectedRange.sheetName;
+            const alreadyOnTarget = plannerAddress.includes(selectedAddr) || selectedAddr.includes(plannerAddress.replace(/!/g, ''));
+            const isCrossSheet = plannerSheet && plannerSheet !== selectedSheet && plannerSheet !== '';
+
+            if (writeActions.includes(step.action) && !alreadyOnTarget && !isCrossSheet) {
+              console.log('[EXECUTION] Overwriting params with selected range:', selectedAddr, selectedSheet);
+              params.address = selectedAddr;
+              params.sheet_name = selectedSheet;
+              validationErrors.push(`Step ${i + 1}: Using selected range "${selectedAddr}" in "${selectedSheet}"`);
+            } else if (writeActions.includes(step.action) && isCrossSheet) {
+              validationErrors.push(`Step ${i + 1}: Kept planner's cross-sheet address "${plannerAddress}" on "${plannerSheet}"`);
             }
-            // For charts, use selected range as data source
+
+            // For formulas: only override sheet_name, keep formula address intact
+            if (step.action === 'set_formulas') {
+              if (!params.sheet_name || params.sheet_name === 'Sheet1') {
+                params.sheet_name = selectedSheet;
+                validationErrors.push(`Step ${i + 1}: Directed formulas to selected sheet "${selectedSheet}" (kept formula address)`);
+              }
+            }
+
+            // For charts, use selected range as data source only if planner didn't specify one
             if (step.action === 'create_chart' && !params.data_range) {
               params.data_range = selectedRange.address;
-              params.sheet_name = selectedRange.sheetName;
+              params.sheet_name = selectedSheet;
               validationErrors.push(`Step ${i + 1}: Using selected range as chart data source`);
             }
           }
@@ -1569,6 +1172,62 @@ export default function App() {
               } catch {}
             }
 
+            // Pre-execution Validation: Verify sheet exists before write
+            const preValidationErrors: string[] = [];
+            if (params.sheet_name && !knownSheets.has(params.sheet_name) && step.action !== 'add_worksheet') {
+              // Check if sheet actually exists in workbook
+              try {
+                const freshCtx = await getWorkbookContext();
+                if (freshCtx) {
+                  const ctx = JSON.parse(freshCtx);
+                  const actualSheets = ctx.sheets || [];
+                  if (!actualSheets.includes(params.sheet_name)) {
+                    preValidationErrors.push(`Sheet "${params.sheet_name}" does not exist. Available: ${actualSheets.join(', ')}`);
+                  }
+                }
+              } catch {}
+            }
+
+            // Validate formula syntax before writing
+            if (step.action === 'set_formulas' && params.formulas) {
+              for (const row of params.formulas) {
+                if (Array.isArray(row)) {
+                  for (const cell of row) {
+                    if (typeof cell === 'string') {
+                      const openParens = (cell.match(/\(/g) || []).length;
+                      const closeParens = (cell.match(/\)/g) || []).length;
+                      if (openParens !== closeParens) {
+                        preValidationErrors.push(`Formula has unbalanced parentheses: ${cell.slice(0, 30)}...`);
+                      }
+                      if (cell.toUpperCase().includes('VLOOKUP')) {
+                        const vlookupArgs = cell.split(',');
+                        if (vlookupArgs.length < 4) {
+                          preValidationErrors.push(`VLOOKUP missing arguments (needs 4): ${cell.slice(0, 30)}...`);
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+
+            // Validate data type compatibility for sort
+            if (step.action === 'sort_range' && typeof params.column_index === 'number') {
+              if (params.column_index < 0) {
+                params.column_index = 0;
+                preValidationErrors.push('column_index clamped to 0');
+              }
+            }
+
+            if (preValidationErrors.length > 0) {
+              const shouldContinue = preValidationErrors.some(e => !e.includes('does not exist'));
+              if (preValidationErrors.some(e => e.includes('does not exist'))) {
+                executionResults.push({ action: step.action, success: false, output: `Validation failed: ${preValidationErrors.join('; ')}` });
+                continue;
+              }
+              validationErrors.push(`Step ${i + 1} warnings: ${preValidationErrors.join('; ')}`);
+            }
+
             while (retryCount < 2) {
               try {
                 const result = await executeStep(fixedStep);
@@ -1637,6 +1296,7 @@ export default function App() {
                         provider: settings.provider,
                         model: effectiveModel,
                         api_key: apiKey,
+                        selected_range: selectedRangeData,
                       }),
                     });
                     if (adaptiveReflect.ok) {
@@ -1684,6 +1344,7 @@ export default function App() {
                   provider: settings.provider,
                   model: effectiveModel,
                   api_key: apiKey,
+                  selected_range: selectedRangeData,
                 }),
               });
               
@@ -2053,6 +1714,141 @@ async function getSelectedRangeData(): Promise<string | null> {
       }).catch(() => resolve(null));
     });
   } catch { return null; }
+}
+
+// Workbook metadata cache — only refetch when structure changes
+let _metadataCache: { hash: string; data: string } | null = null;
+
+function computeMetadataHash(sheetNames: string[]): string {
+  return sheetNames.sort().join('|');
+}
+
+async function getWorkbookMetadata(): Promise<string | null> {
+  try {
+    const structure = await ExcelAPI.getWorkbookStructure();
+    const sheetNames = structure.sheets.map(s => s.name);
+    const hash = computeMetadataHash(sheetNames);
+
+    // Return cached if structure unchanged
+    if (_metadataCache && _metadataCache.hash === hash) {
+      return _metadataCache.data;
+    }
+
+    // Fetch headers for each sheet (first row only, up to 5 sheets)
+    const sheetDetails: Array<{
+      name: string;
+      rowCount: number;
+      columnCount: number;
+      headers: string[];
+    }> = [];
+
+    for (const sheet of structure.sheets.slice(0, 5)) {
+      try {
+        const sheetData = await ExcelAPI.getSheetData(sheet.name, 1);
+        const headers = sheetData && sheetData.values && sheetData.values.length > 0
+          ? sheetData.values[0].map((h, i) => h ? String(h).trim() : `Column ${i + 1}`)
+          : [];
+        sheetDetails.push({
+          name: sheet.name,
+          rowCount: sheet.rowCount,
+          columnCount: sheet.columnCount,
+          headers,
+        });
+      } catch {
+        sheetDetails.push({
+          name: sheet.name,
+          rowCount: sheet.rowCount,
+          columnCount: sheet.columnCount,
+          headers: [],
+        });
+      }
+    }
+
+    const metadata = JSON.stringify({
+      sheets: sheetDetails,
+      tables: structure.tables.map(t => ({
+        name: t.name,
+        sheetName: t.sheetName,
+        rowCount: t.rowCount,
+        columns: t.columns,
+      })),
+      namedRanges: structure.namedRanges.map(n => ({
+        name: n.name,
+        sheetName: n.sheetName,
+        address: n.address,
+      })),
+      activeSheet: structure.activeSheet,
+    });
+
+    _metadataCache = { hash, data: metadata };
+    return metadata;
+  } catch {
+    return null;
+  }
+}
+
+// Cross-sheet pre-scan: if user mentions another sheet, fetch its headers + first few rows
+async function prescanReferencedSheets(userMessage: string, metadata: string | null): Promise<string | null> {
+  if (!metadata) return null;
+  try {
+    const wm = JSON.parse(metadata);
+    const sheetNames = wm.sheets.map((s: any) => s.name);
+    if (sheetNames.length <= 1) return null;
+
+    // Detect sheet references in user message (e.g., "Sheet2", "from Data", "in Summary")
+    const referencedSheets: string[] = [];
+    for (const name of sheetNames) {
+      const regex = new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+      if (regex.test(userMessage)) {
+        referencedSheets.push(name);
+      }
+    }
+
+    if (referencedSheets.length === 0) return null;
+
+    // Fetch headers + first 3 rows for each referenced sheet
+    const prescanResults: Array<{
+      sheetName: string;
+      headers: string[];
+      sampleRows: any[][];
+      totalRows: number;
+    }> = [];
+
+    for (const sheetName of referencedSheets) {
+      try {
+        const data = await ExcelAPI.getSheetData(sheetName, 4); // header + 3 rows
+        if (data && data.values && data.values.length > 0) {
+          const headers = data.values[0].map((h, i) => h ? String(h).trim() : `Column ${i + 1}`);
+          const sampleRows = data.values.slice(1, 4);
+          prescanResults.push({
+            sheetName,
+            headers,
+            sampleRows,
+            totalRows: data.rowCount,
+          });
+        }
+      } catch {
+        // Skip if sheet can't be read
+      }
+    }
+
+    if (prescanResults.length === 0) return null;
+
+    const lines = ["CROSS-SHEET PRESCAN:"];
+    for (const ps of prescanResults) {
+      lines.push(`  ${ps.sheetName} (${ps.totalRows} rows): headers=[${ps.headers.join(', ')}]`);
+      for (let i = 0; i < ps.sampleRows.length; i++) {
+        lines.push(`    Row ${i + 2}: ${JSON.stringify(ps.sampleRows[i])}`);
+      }
+    }
+
+    // Merge prescan into existing metadata
+    const merged = JSON.parse(metadata);
+    merged.prescan = prescanResults;
+    return JSON.stringify(merged);
+  } catch {
+    return null;
+  }
 }
 
 function validatePlan(plan: { action: string; params: Record<string, any>; description: string }[], userMessage: string = ''): { validSteps: { action: string; params: Record<string, any>; description: string }[]; validationErrors: string[] } {

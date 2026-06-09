@@ -36,6 +36,7 @@ class ChatRequest(BaseModel):
     memory_context: Optional[str] = None
     enable_reasoning: Optional[bool] = True
     conversation_history: Optional[List[dict]] = []
+    workbook_metadata: Optional[str] = None
 
 
 class ExecuteRequest(BaseModel):
@@ -131,6 +132,57 @@ Return ONLY valid JSON:
 {{"needs_clarification": false}} OR {{"needs_clarification": true, "question": "Your question here"}}"""
 
 
+# Semantic column resolution — maps user terminology to workbook headers
+SYNONYM_MAP = {
+    "sales": ["revenue", "amount", "income", "earnings", "proceeds", "net sales", "gross sales"],
+    "customer": ["client", "buyer", "purchaser", "account", "consumer", "patron"],
+    "product": ["item", "sku", "goods", "merchandise", "article", "product name"],
+    "date": ["time", "day", "month", "year", "period", "transaction date", "order date"],
+    "profit": ["earnings", "net income", "margin", "gain", "net profit", "gross profit"],
+    "cost": ["expense", "expenditure", "spending", "outlay", "cogs", "cost of goods"],
+    "quantity": ["qty", "count", "volume", "units", "num", "amount"],
+    "price": ["rate", "unit price", "cost per unit", "msrp", "list price"],
+    "region": ["area", "territory", "zone", "location", "district", "market"],
+    "category": ["type", "group", "segment", "class", "subcategory"],
+    "employee": ["staff", "worker", "personnel", "team member", "associate"],
+    "order": ["purchase", "transaction", "sale", "invoice"],
+    "discount": ["reduction", "markdown", "off", "savings"],
+    "total": ["sum", "amount", "grand total", "overall"],
+    "name": ["title", "label", "description", "full name"],
+    "status": ["state", "condition", "stage", "phase"],
+    "rating": ["score", "grade", "rank", "evaluation"],
+    "feedback": ["review", "comment", "response", "opinion"],
+}
+
+
+def resolve_semantic_matches(user_message: str, headers: list) -> str:
+    """Check if user message terms semantically match workbook headers via synonym map."""
+    if not headers:
+        return ""
+
+    msg_lower = user_message.lower()
+    matches = []
+
+    for term, synonyms in SYNONYM_MAP.items():
+        # Check if user mentioned this term or any of its synonyms
+        term_found = term in msg_lower
+        synonym_found = any(syn in msg_lower for syn in synonyms)
+
+        if term_found or synonym_found:
+            # Check if any workbook header matches this term or its synonyms
+            for header in headers:
+                header_lower = str(header).lower().strip()
+                if (term in header_lower or
+                    any(syn in header_lower for syn in synonyms) or
+                    header_lower in [term] + synonyms):
+                    matches.append(f'User "{term}" → header "{header}"')
+
+    if not matches:
+        return ""
+
+    return "SEMANTIC COLUMN MATCHES:\n" + "\n".join(f"  {m}" for m in matches)
+
+
 def setup_env(provider: str, model: str, api_key: str) -> str:
     """Configure environment variables for CrewAI and return the model string to use."""
     keys_to_clear = [
@@ -176,9 +228,13 @@ TASK_DESCRIPTION = """Create a JSON plan for this Excel request: {message}
 
 {context_info}
 {selected_info}
+{workbook_metadata_info}
 
 COLUMN HEADERS (use these for charts!):
 {headers_context}
+
+SEMANTIC MATCHES (user terms mapped to actual headers):
+{semantic_matches}
 
 TABLE SCHEMA (deterministic context agent output):
 {schema_context}
@@ -244,10 +300,19 @@ IMPORTANT - SORTING:
 
 For charts (create_chart), use these params:
 - chart_type: "column", "bar", "line", "pie", "pie3D", "doughnut", "area", "scatter", "radar", "surface", "bubble"
-- data_range: A1 notation range that contains the data (e.g., "A1:B10")
+- data_range: A1 notation range that contains ALL chart data including headers (e.g., "A1:B10")
 - sheet_name: name of the sheet
-- title: chart title (optional)
+- title: descriptive chart title (e.g., "Revenue by Region" not "Chart 1")
 - position: {{"left": 300, "top": 50, "width": 400, "height": 300}} (optional, pixels from top-left)
+
+CHART COLUMN SELECTION — use the COLUMN HEADERS and DATA QUALITY PROFILE above:
+- For bar/column charts: categorical column (X-axis) + numeric column (Y-axis)
+- For pie charts: one categorical column + one numeric column
+- For line charts: one categorical/date column (X-axis) + one numeric column (Y-axis)
+- For scatter: two numeric columns
+- The DATA QUALITY PROFILE shows type=numeric/text per column — use this to pick correctly
+- Include the header row in data_range (e.g., if headers are row 1 and data is rows 2-100, use "A1:B100")
+- Title format: "{{Y-axis metric}} by {{X-axis category}}" (e.g., "Revenue by Region", "Sales Trend by Month")
 
 Respond with a JSON object ONLY:
 {{
@@ -255,11 +320,19 @@ Respond with a JSON object ONLY:
     {{
       "action": "tool_name",
       "params": {{"key": "value"}},
-      "description": "What this step does"
+      "description": "What this step does",
+      "confidence": 0.9
     }}
   ],
   "response": "Natural language summary for the user"
 }}
+
+CONFIDENCE SCORING — assign a confidence score (0.0-1.0) to each step:
+- 0.90-1.00: High confidence — straightforward write/format with clear data and addresses
+- 0.70-0.89: Medium confidence — chart creation, formatting across ranges, multi-step operations
+- 0.50-0.69: Low confidence — ambiguous references, inferred column names, cross-sheet operations
+- Below 0.50: Very low — guesswork, missing data, unclear user intent
+Score based on: clarity of user request, data availability, address precision, action destructiveness.
 
 CRITICAL RULES — FOLLOW THESE EXACTLY:
 1. MULTIPLE REQUESTS: If the user asks for multiple things (e.g., "bar graph AND pie chart"), you MUST create SEPARATE steps for EACH item. Do NOT combine them into one step.
@@ -599,7 +672,7 @@ def build_table_schema(data: List[List[Any]]) -> dict:
 
 
 def profile_data(data: List[List[Any]]) -> str:
-    """Deep data profiling for the planner. Returns a human-readable summary of data quality issues."""
+    """Deep data profiling for the planner. Returns a human-readable summary with column intelligence."""
     if not data or len(data) < 2:
         return "No data to profile."
 
@@ -612,6 +685,7 @@ def profile_data(data: List[List[Any]]) -> str:
 
     issues = []
     highlights = []
+    column_details = []
 
     # 1. Duplicate detection
     seen = set()
@@ -632,6 +706,13 @@ def profile_data(data: List[List[Any]]) -> str:
         null_count = total_rows - len(non_empty)
         null_pct = round(null_count / total_rows * 100, 1) if total_rows > 0 else 0
 
+        # Unique value count
+        unique_vals = list(set(str(v) for v in non_empty))
+        unique_count = len(unique_vals)
+
+        # Sample values (up to 5 unique non-empty)
+        sample_vals = unique_vals[:5]
+
         # Null check
         if null_pct > 20:
             issues.append(f"'{header}': {null_pct}% empty cells")
@@ -648,16 +729,21 @@ def profile_data(data: List[List[Any]]) -> str:
             else:
                 text_count += 1
 
-        if num_count > 0 and text_count > 0 and len(non_empty) > 2:
+        detected_type = "text"
+        if num_count > len(non_empty) * 0.8 and len(non_empty) > 0:
+            detected_type = "numeric"
+        elif num_count > 0 and text_count > 0 and len(non_empty) > 2:
+            detected_type = "mixed"
             num_pct = round(num_count / len(non_empty) * 100, 1)
             issues.append(
                 f"'{header}': mixed types ({num_pct}% numeric, {round(100 - num_pct, 1)}% text)"
             )
 
-        # Outlier detection (basic: values > 3 std dev from mean)
-        if num_count > 5:
+        # Numeric statistics (min, max, mean, median)
+        numeric_stats = ""
+        if detected_type == "numeric" and num_count > 3:
             nums = []
-            for v in non_empty[:100]:
+            for v in non_empty[:200]:
                 try:
                     nums.append(
                         float(
@@ -665,21 +751,42 @@ def profile_data(data: List[List[Any]]) -> str:
                             .replace(",", "")
                             .replace("$", "")
                             .replace("₹", "")
+                            .replace("%", "")
                             .strip()
                         )
                     )
                 except:
                     pass
-            if len(nums) > 5:
-                mean = sum(nums) / len(nums)
-                variance = sum((x - mean) ** 2 for x in nums) / len(nums)
+            if len(nums) > 3:
+                nums_sorted = sorted(nums)
+                min_val = nums_sorted[0]
+                max_val = nums_sorted[-1]
+                mean_val = sum(nums) / len(nums)
+                mid = len(nums_sorted) // 2
+                median_val = (
+                    nums_sorted[mid]
+                    if len(nums_sorted) % 2 == 1
+                    else (nums_sorted[mid - 1] + nums_sorted[mid]) / 2
+                )
+                numeric_stats = f"min={min_val}, max={max_val}, mean={round(mean_val, 2)}, median={round(median_val, 2)}"
+
+                # Outlier detection (values > 3 std dev from mean)
+                variance = sum((x - mean_val) ** 2 for x in nums) / len(nums)
                 std_dev = variance**0.5
                 if std_dev > 0:
-                    outlier_count = sum(1 for x in nums if abs(x - mean) > 3 * std_dev)
+                    outlier_count = sum(1 for x in nums if abs(x - mean_val) > 3 * std_dev)
                     if outlier_count > 0:
                         highlights.append(
                             f"'{header}': {outlier_count} potential outliers (>3σ)"
                         )
+
+        # Build column detail line
+        detail = f"  {header}: type={detected_type}, unique={unique_count}/{total_rows}"
+        if sample_vals:
+            detail += f", samples={sample_vals}"
+        if numeric_stats:
+            detail += f" [{numeric_stats}]"
+        column_details.append(detail)
 
     # 3. Empty dataset check
     if total_rows == 0:
@@ -697,6 +804,11 @@ def profile_data(data: List[List[Any]]) -> str:
         summary_parts.append("NOTES:")
         for h in highlights[:5]:
             summary_parts.append(f"  ℹ {h}")
+
+    if column_details:
+        summary_parts.append("COLUMN DETAILS:")
+        for detail in column_details:
+            summary_parts.append(detail)
 
     if not issues and not highlights:
         summary_parts.append("Data looks clean — no major issues detected.")
@@ -1554,6 +1666,7 @@ async def chat(req: ChatRequest):
         headers_context = ""
         schema_context = ""
         data_profile = ""
+        semantic_matches = ""
         if req.selected_range:
             try:
                 import json
@@ -1580,6 +1693,8 @@ async def chat(req: ChatRequest):
                         schema_context = json.dumps(schema, ensure_ascii=False)
                         # Deep data profiling for planner
                         data_profile = profile_data(values)
+                        # Semantic column resolution
+                        semantic_matches = resolve_semantic_matches(req.message, header_names)
             except Exception as e:
                 pass  # Keep silent if extraction fails
 
@@ -1593,14 +1708,50 @@ async def chat(req: ChatRequest):
             f"Memory context:\n{req.memory_context}" if req.memory_context else ""
         )
 
+        # Build workbook metadata context (full workbook structure awareness)
+        workbook_metadata_info = ""
+        if req.workbook_metadata:
+            try:
+                wm = req.workbook_metadata
+                if isinstance(wm, str):
+                    wm = json.loads(wm)
+                if isinstance(wm, dict):
+                    sheets = wm.get("sheets", [])
+                    tables = wm.get("tables", [])
+                    named_ranges = wm.get("namedRanges", [])
+                    prescan = wm.get("prescan", [])
+                    active = wm.get("activeSheet", "")
+                    lines = [f"WORKBOOK STRUCTURE ({len(sheets)} sheets, active: {active}):"]
+                    for s in sheets:
+                        hdrs = ", ".join(s.get("headers", [])[:8])
+                        lines.append(f"  {s['name']}: {s['rowCount']} rows x {s['columnCount']} cols — headers: [{hdrs}]")
+                    if tables:
+                        lines.append("TABLES:")
+                        for t in tables:
+                            lines.append(f"  {t['name']} on {t['sheetName']}: {t['rowCount']} rows, columns: {', '.join(t.get('columns', [])[:6])}")
+                    if named_ranges:
+                        lines.append("NAMED RANGES:")
+                        for n in named_ranges:
+                            lines.append(f"  {n['name']} → {n.get('address', 'N/A')}")
+                    if prescan:
+                        lines.append("CROSS-SHEET PRESCAN (data from referenced sheets):")
+                        for ps in prescan:
+                            hdrs = ", ".join(ps.get("headers", [])[:8])
+                            lines.append(f"  {ps['sheetName']} ({ps.get('totalRows', '?')} rows): headers=[{hdrs}]")
+                            for row in ps.get("sampleRows", []):
+                                lines.append(f"    sample: {json.dumps(row, ensure_ascii=False)[:200]}")
+                    workbook_metadata_info = "\n".join(lines)
+            except Exception:
+                pass
+
         # Build conversation history for multi-turn context
         history_info = ""
         if req.conversation_history and len(req.conversation_history) > 0:
-            recent = req.conversation_history[-6:]  # Last 3 exchanges (6 messages)
+            recent = req.conversation_history[-10:]  # Last 5 exchanges (10 messages)
             history_lines = []
             for msg in recent:
                 role = msg.get("role", "user")
-                content = str(msg.get("content", ""))[:300]  # Truncate long messages
+                content = str(msg.get("content", ""))[:600]  # Truncate long messages
                 if role == "user":
                     history_lines.append(f"User: {content}")
                 elif role == "assistant":
@@ -1635,6 +1786,7 @@ User: {req.message}
 {context_info}
 {selected_info}
 {history_info}
+{memory_info}
 
 COLUMN HEADERS: {headers_context or "No column headers available"}
 TABLE SCHEMA: {schema_context or "No schema available"}
@@ -1739,7 +1891,9 @@ Is this request clear enough to create a plan, or does it need clarification?"""
                     message=req.message,
                     context_info=context_info,
                     selected_info=selected_info,
+                    workbook_metadata_info=workbook_metadata_info or "No workbook metadata available",
                     headers_context=headers_context,
+                    semantic_matches=semantic_matches or "No semantic matches found",
                     schema_context=schema_context or "No schema available",
                     data_profile=data_profile or "No data to profile",
                     memory_info=memory_info,
@@ -2277,6 +2431,7 @@ class ReflectRequest(BaseModel):
     provider: str = "openai"
     model: str = ""
     api_key: str
+    selected_range: Optional[str] = None
 
 
 REFLECTION_PROMPT = """You are a self-correction agent. Your job is to analyze failed execution steps and create a recovery plan.
@@ -2289,12 +2444,18 @@ Planned steps:
 Results:
 {results}
 
+DATA CONTEXT:
+Headers: {headers_context}
+Schema: {schema_context}
+
 Rules:
 1. Only create recovery steps for actions that FAILED (success: false)
 2. If table creation failed with "overlap", suggest a different approach (e.g., just write data without table, or use a different range)
 3. If set_values failed, suggest fixing the data dimensions
-4. Keep recovery steps minimal - only fix what's broken
-5. Return ONLY valid JSON array of recovery steps
+4. If formula failed, check column headers above to ensure correct references
+5. Keep recovery steps minimal - only fix what's broken
+6. Use the column headers above to create accurate cell references in recovery steps
+7. Return ONLY valid JSON array of recovery steps
 
 Return format:
 [{{"action": "set_values", "params": {{"address": "A1", "values": [...], "sheet_name": "Sheet1"}}, "description": "Retry with corrected data"}}]
@@ -2313,6 +2474,29 @@ async def reflect(req: ReflectRequest):
 
         model = setup_env(req.provider, req.model, req.api_key)
 
+        # Extract headers and schema from selected_range for context-aware reflection
+        headers_context = "No headers available"
+        schema_context = "No schema available"
+        if req.selected_range:
+            try:
+                sr = req.selected_range
+                if isinstance(sr, str):
+                    try:
+                        sr = json.loads(sr)
+                    except:
+                        sr = None
+                if sr and isinstance(sr, dict):
+                    values = sr.get("values", [])
+                    if values and len(values) > 0:
+                        headers = values[0] if values[0] else []
+                        header_names = [h for h in headers if h]
+                        if header_names:
+                            headers_context = f"Column headers: {', '.join(header_names)}"
+                        schema = build_table_schema(values)
+                        schema_context = json.dumps(schema, ensure_ascii=False)
+            except Exception:
+                pass
+
         plan_str = "\n".join(
             [
                 f"{i + 1}. {s.get('action', 'unknown')}: {s.get('description', '')}"
@@ -2330,6 +2514,8 @@ async def reflect(req: ReflectRequest):
             message=req.message,
             plan=plan_str,
             results=results_str,
+            headers_context=headers_context,
+            schema_context=schema_context,
         )
 
         reflector = Agent(
