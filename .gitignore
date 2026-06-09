@@ -1,8 +1,46 @@
+# Dependencies
 node_modules/
+
+# Build output
 dist/
+
+# Python
 .pyc
 __pycache__/
+*.pyc
+*.pyo
+.ruff_cache/
+
+# SSL certificates / private keys
 *.pem
+*.key
+*.cert
+*.crt
+*.p12
+*.pfx
+
+# Environment files
 .env
 .env.local
+.env.production
+.env.*.local
+
+# OS files
 .DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+
+# Internal data files
+consolidation_ops.json
+knowledge_update.json
+
+# OpenCode
+.opencode/

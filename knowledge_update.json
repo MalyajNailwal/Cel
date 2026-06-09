@@ -1,8 +1,0 @@
-[
-  {
-    "op": "update",
-    "id": "019d6271-d7c1-79b6-a402-e79fcc46b610",
-    "content": "Chart column detection is now fully dynamic with no hardcoded patterns: (1) Column type detection samples first 10 rows and counts numeric vs categorical values to determine type; (2) User column matching extracts all words from message (excluding common words like 'bar', 'graph', 'chart', 'make'), then fuzzy-matches against all headers using includes matching and prefix matching (first 3 chars); (3) AI recommendation extraction uses robust pattern matching on analysis text. Works on any dataset without hardcoded column names.",
-    "confidence": 1.0
-  }
-]
