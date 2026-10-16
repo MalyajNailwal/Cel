@@ -12,6 +12,10 @@ function inlineAssets(): Plugin {
   };
 }
 
+const devHttps = fs.existsSync('./key.pem') && fs.existsSync('./cert.pem')
+  ? { key: fs.readFileSync('./key.pem'), cert: fs.readFileSync('./cert.pem') }
+  : undefined;
+
 export default defineConfig({
   plugins: [react(), inlineAssets()],
   resolve: {
@@ -30,10 +34,7 @@ export default defineConfig({
   },
   server: {
     port: 3000,
-    https: {
-      key: fs.readFileSync('./key.pem'),
-      cert: fs.readFileSync('./cert.pem'),
-    },
+    https: devHttps,
     headers: {
       'Access-Control-Allow-Origin': '*',
     },

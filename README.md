@@ -12,14 +12,9 @@ Cel is a multi-agent Excel add-in that interprets natural language, generates ex
 User: "Create a bar chart of revenue by region"
 
     ┌──────────────┐
-    │  Reasoning   │  Decomposes intent, identifies columns, checks memory
-    │    Agent     │  "Revenue=numeric, Region=categorical, use bar chart"
-    └──────┬───────┘
-           ▼
-    ┌──────────────┐
-    │   Planner    │  Generates JSON plan with confidence scores
-    │    Agent     │  [{action: "create_chart", confidence: 0.85}]
-    └──────┬───────┘
+    │   Planner    │  ONE LLM call returns reasoning + clarification
+    │              │  verdict + plan, with per-step confidence
+    └──────┬───────┘  [{action: "create_chart", confidence: 0.85}]
            ▼
     ┌──────────────┐
     │   Executor   │  Validates, checkpoints, executes via Office.js
@@ -27,9 +22,16 @@ User: "Create a bar chart of revenue by region"
     └──────┬───────┘
            ▼
     ┌──────────────┐
-    │  Validator   │  Verifies outcomes, triggers reflection on failure
+    │  Validator   │  Summarises outcomes
+    └──────┬───────┘  (degrades gracefully if the LLM is down)
+           ▼
+    ┌──────────────┐
+    │  Reflector   │  Only on failure — minimal recovery steps
     └──────────────┘
 ```
+
+The planner sees column headers, inferred types, numeric-column candidates, existing
+formulas, number formats, semantic header matches, cross-sheet prescan, and user memory.
 
 Every request goes through the same pipeline. Charts, formulas, formatting, data generation — all planned, validated, and reversible.
 
@@ -39,7 +41,7 @@ Every request goes through the same pipeline. Charts, formulas, formatting, data
 
 | Feature | What It Does |
 |---------|-------------|
-| **Multi-Agent Pipeline** | Reasoning → Planning → Execution → Validation — each step bounded |
+| **Single-Call Planning** | Reasoning, clarification, and plan come from one LLM call, not three |
 | **Confidence Scoring** | Each plan step scored 0-100%. Low confidence prompts confirmation |
 | **Workbook Awareness** | Planner sees full structure: all sheets, headers, tables, named ranges |
 | **Cross-Sheet Intelligence** | User says "copy from DataSheet" → planner fetches that sheet's headers |
@@ -49,6 +51,11 @@ Every request goes through the same pipeline. Charts, formulas, formatting, data
 | **Persistent Memory** | User rules, formatting conventions, past mistakes carried across sessions |
 | **Self-Recovery** | On failure, reflector re-plans using column headers and error context |
 | **Any Model** | OpenAI, Anthropic, Google, OpenRouter — any model ID, no hardcoding |
+| **Formula Safety** | Cells holding formulas are never overwritten with literals — the step is refused |
+| **Pivot Tables** | "Summarize sales by region" writes a real aggregate table |
+| **Format-Preserving Copy** | `copy_range` keeps values, formulas, and formatting across sheets |
+| **Layout Control** | Auto-fit columns, row heights, column widths, freeze panes |
+| **Cell Notes & Links** | Add comments and hyperlinks without leaving the add-in |
 
 ---
 
@@ -65,6 +72,8 @@ Every request goes through the same pipeline. Charts, formulas, formatting, data
 | Recovery via reflection | Yes | Limited | Basic |
 | Dynamic model selection | Any model ID | Fixed | Fixed |
 | Backend data analysis | 100k+ rows | No | No |
+| Pivot table creation | Yes | Yes | No |
+| Formula-overwrite guard | Yes | No | No |
 
 ---
 

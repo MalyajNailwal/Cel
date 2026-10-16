@@ -9,20 +9,37 @@ from typing import Optional, List, Any
 import os
 import json
 import re
-import io
-import base64
 import random
-import string
 from collections import Counter
-from datetime import datetime, timedelta
+from contextlib import asynccontextmanager
+import logging
+
+from llm import call_llm, aclose as close_llm
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+logger = logging.getLogger("cel")
 
 app = FastAPI()
 
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    yield
+    await close_llm()
+
+
+app.router.lifespan_context = lifespan
+
+_origins = os.environ.get(
+    "CEL_ALLOWED_ORIGINS",
+    "https://localhost:3000,https://127.0.0.1:3000",
+).split(",")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=[o.strip() for o in _origins if o.strip()],
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type"],
 )
 
 
@@ -57,19 +74,6 @@ class AnalyzeRequest(BaseModel):
     headers: Optional[List[str]] = None
 
 
-class ChartIntentRequest(BaseModel):
-    data: List[List[Any]]
-    question: str
-    headers: Optional[List[str]] = None
-    start_col_index: Optional[int] = 0
-
-
-class VerifyChartExecutionRequest(BaseModel):
-    request_message: str
-    expected_charts: List[dict]
-    created_charts: List[dict]
-
-
 class GenerateDataRequest(BaseModel):
     data_type: str = "employee"
     count: int = 100
@@ -81,56 +85,22 @@ class ChatResponse(BaseModel):
     reasoning: Optional[str] = None
 
 
-REASONING_PROMPT = """You are an Excel reasoning agent. Your job is to understand what the user wants and explain your thinking in agentic terms.
+CLARIFICATION_PROMPT = """CLARIFICATION - check BEFORE planning.
 
-IMPORTANT - RESPONSE STYLE:
-- ALWAYS describe what YOU (the AI) will do, NOT what user should do manually
-- NEVER say "Go to Home tab" or "click" or "select" — that's manual Excel work
-- Use phrases like "I will...", "I'll apply...", "I'll create...", "I'll format..."
-- Keep it conversational and clear
+If the request is CLEAR and SPECIFIC (e.g. "add bold to A1:A10", "create bar chart",
+"sum column B", "replace X with Y", "add borders to selected cells", "sort by Salary
+descending", "add a new sheet called Dashboard", "create a table with 100 employees"),
+do NOT ask. Return an empty clarification_question.
 
-Example GOOD: "I will add black borders to the selected cells using apply_format"
-Example BAD: "Go to Home tab, click Borders, choose Outside Borders"
+Only ask ONE question when the request is genuinely ambiguous:
+- "clean the data" -> what specifically? duplicates, empty cells, formatting, or other?
+- "make it look better" -> borders, colors, bold headers, or column widths?
+- "fix the issues" -> which: formula errors, duplicates, empty cells, type mismatches?
+- "organize this" -> sort, group, filter, or create a table?
+- "format this properly" -> currency, percentages, dates, bold headers, or conditional?
 
-Analyze and explain:
-1. What user wants (1-2 sentences)
-2. What data operations needed
-3. How you'll approach it (agentic steps, not manual Excel steps)"""
-
-
-CLARIFICATION_PROMPT = """You are a Clarification Agent for an Excel AI assistant. Your job is to detect ambiguous requests and ask clarifying questions INSTEAD of guessing.
-
-RULES — Be STRICT about these:
-1. If the request is CLEAR and SPECIFIC (e.g., "add bold to A1:A10", "create bar chart", "sum column B", "replace X with Y", "add borders to selected cells"), return {{"needs_clarification": false}}
-2. If the request is AMBIGUOUS or VAGUE, return {{"needs_clarification": true, "question": "Your clarifying question"}}
-
-AMBIGUOUS requests include:
-- "clean the data" → Ask: "What specifically should I clean? Remove duplicates, fill empty cells, fix formatting, or something else?"
-- "make it look better" → Ask: "Should I add borders, colors, bold headers, or adjust column widths?"
-- "fix the issues" → Ask: "What issues? I can check for formula errors, duplicates, empty cells, or data type mismatches. Which one?"
-- "organize this" → Ask: "Should I sort by a column, group by category, add filters, or create a table?"
-- "format this properly" → Ask: "What format? Currency ($), percentages, dates, bold headers, or conditional formatting?"
-- "do something with this" → Ask: "I can analyze, chart, format, or modify this data. What would you like?"
-- "help me with this data" → Ask: "I can analyze trends, create charts, clean up, or add calculations. What do you need?"
-
-CLEAR requests (no clarification needed):
-- "add borders to selected cells"
-- "create a pie chart from Product and Sales columns"
-- "sum of column B"
-- "replace 'USA' with 'United States'"
-- "highlight cells greater than 100 in yellow"
-- "add a new sheet called Dashboard"
-- "sort by Salary descending"
-- "set column A to bold"
-- "create a table with 100 employees"
-- "fill formula =A1*2 down to A10"
-
-CRITICAL: If there is selected data with column headers AND the user asks about specific columns (mentioned by name), that is CLEAR — no clarification needed.
-If there is NO selected range or the request doesn't reference specific data, be MORE likely to ask for clarification.
-
-Return ONLY valid JSON:
-{{"needs_clarification": false}} OR {{"needs_clarification": true, "question": "Your question here"}}"""
-
+If there ARE column headers available and the user names specific columns, it is CLEAR.
+If there is NO selected range and the request does not reference specific data, lean toward asking."""
 
 # Semantic column resolution — maps user terminology to workbook headers
 SYNONYM_MAP = {
@@ -155,62 +125,135 @@ SYNONYM_MAP = {
 }
 
 
+def _normalize_text(value: Any) -> str:
+    return str(value or "").strip().lower()
+
+
+def _tokenize(value: str) -> List[str]:
+    return [t for t in re.split(r"[^a-z0-9]+", value.lower()) if t]
+
+
+def _score_header_match(header: str, term: str) -> float:
+    h = _normalize_text(header)
+    t = _normalize_text(term)
+    if not h or not t:
+        return 0.0
+    if h == t:
+        return 1.0
+    if h in t or t in h:
+        return 0.85
+    h_tokens = _tokenize(h)
+    t_tokens = _tokenize(t)
+    if not h_tokens or not t_tokens:
+        return 0.0
+    overlap = len([x for x in h_tokens if x in t_tokens])
+    if overlap == 0:
+        return 0.0
+    return overlap / max(len(h_tokens), len(t_tokens))
+
+
+def _resolve_best_header_index(
+    headers: List[str], term: str, threshold: float = 0.55
+) -> Optional[int]:
+    best_idx = None
+    best_score = 0.0
+    for i, header in enumerate(headers):
+        s = _score_header_match(header, term)
+        if s > best_score:
+            best_score = s
+            best_idx = i
+    return best_idx if best_score >= threshold else None
+
+
+def _is_numeric_column(rows: List[List[Any]], col_idx: int) -> bool:
+    num_count = 0
+    cat_count = 0
+    sample_size = min(20, len(rows))
+    for i in range(sample_size):
+        val = rows[i][col_idx] if col_idx < len(rows[i]) else None
+        if val in (None, ""):
+            continue
+        cleaned = re.sub(r"[^0-9.\-]", "", str(val))
+        if cleaned and re.fullmatch(r"-?\d+(\.\d+)?", cleaned):
+            num_count += 1
+        else:
+            cat_count += 1
+    return num_count > cat_count
+
+
+def _format_formula_context(sr: dict) -> str:
+    """List cells that already hold a formula, so the planner does not flatten them."""
+    cells = sr.get("formulaCells") or []
+    if not cells:
+        formulas = sr.get("formulas") or []
+        cells = []
+        for r, row in enumerate(formulas[:60]):
+            for c, value in enumerate(row):
+                if isinstance(value, str) and value.startswith("="):
+                    letters = ""
+                    n = c
+                    while n >= 0:
+                        letters = chr(65 + (n % 26)) + letters
+                        n = n // 26 - 1
+                    cells.append({"address": f"{letters}{r + 1}", "formula": value})
+    if not cells:
+        return ""
+    lines = [f"  {c['address']}: {c['formula']}" for c in cells[:25] if isinstance(c, dict)]
+    if len(cells) > 25:
+        lines.append(f"  ... and {len(cells) - 25} more")
+    return "\n".join(lines)
+
+
+def _format_number_formats(sr: dict) -> str:
+    """Surface the number formats already applied, so currency/percent survives."""
+    formats = sr.get("numberFormats") or []
+    if not formats:
+        return ""
+    return ", ".join(str(f) for f in formats[:12])
+
+
+def _numeric_column_list(values: list, headers: list) -> str:
+    """Name the columns a chart or aggregate can safely treat as numeric."""
+    rows = values[1:] if len(values) > 1 else []
+    if not rows:
+        return ""
+    names = [headers[i] for i in range(len(headers)) if _is_numeric_column(rows, i)]
+    return ", ".join(names) if names else "None - all columns look like text"
+
+
 def resolve_semantic_matches(user_message: str, headers: list) -> str:
-    """Check if user message terms semantically match workbook headers via synonym map."""
+    """Map user terminology onto real headers using synonyms + token overlap."""
     if not headers:
         return ""
 
     msg_lower = user_message.lower()
-    matches = []
+    matches: list[str] = []
 
     for term, synonyms in SYNONYM_MAP.items():
-        # Check if user mentioned this term or any of its synonyms
-        term_found = term in msg_lower
-        synonym_found = any(syn in msg_lower for syn in synonyms)
+        if term not in msg_lower and not any(syn in msg_lower for syn in synonyms):
+            continue
+        best_idx = _resolve_best_header_index(headers, term, threshold=0.55)
+        if best_idx is None:
+            for syn in synonyms:
+                best_idx = _resolve_best_header_index(headers, syn, threshold=0.55)
+                if best_idx is not None:
+                    break
+        if best_idx is not None:
+            matches.append(f'User "{term}" -> header "{headers[best_idx]}"')
 
-        if term_found or synonym_found:
-            # Check if any workbook header matches this term or its synonyms
-            for header in headers:
-                header_lower = str(header).lower().strip()
-                if (term in header_lower or
-                    any(syn in header_lower for syn in synonyms) or
-                    header_lower in [term] + synonyms):
-                    matches.append(f'User "{term}" → header "{header}"')
+    # Token overlap catches literal mentions the synonym map has no entry for.
+    for i, header in enumerate(headers):
+        if any(f'header "{header}"' in m for m in matches):
+            continue
+        h = _normalize_text(header)
+        if len(h) < 3:
+            continue
+        if re.search(rf"\b{re.escape(h)}\b", msg_lower):
+            matches.append(f'Exact mention -> header "{header}" (index {i})')
 
     if not matches:
         return ""
-
     return "SEMANTIC COLUMN MATCHES:\n" + "\n".join(f"  {m}" for m in matches)
-
-
-def setup_env(provider: str, model: str, api_key: str) -> str:
-    """Configure environment variables for CrewAI and return the model string to use."""
-    keys_to_clear = [
-        "OPENAI_API_KEY",
-        "OPENAI_API_BASE",
-        "OPENAI_MODEL_NAME",
-        "ANTHROPIC_API_KEY",
-        "ANTHROPIC_MODEL_NAME",
-        "GOOGLE_API_KEY",
-        "GOOGLE_MODEL_NAME",
-        "OPENROUTER_API_KEY",
-    ]
-    for k in keys_to_clear:
-        os.environ.pop(k, None)
-
-    if provider == "openrouter":
-        os.environ["OPENROUTER_API_KEY"] = api_key
-        return "openrouter/" + model
-    elif provider == "openai":
-        os.environ["OPENAI_API_KEY"] = api_key
-    elif provider == "anthropic":
-        os.environ["ANTHROPIC_API_KEY"] = api_key
-    elif provider == "google":
-        os.environ["GOOGLE_API_KEY"] = api_key
-    else:
-        os.environ["OPENAI_API_KEY"] = api_key
-
-    return model
 
 
 SYSTEM_PROMPT = """You are an expert Excel analyst. You create detailed, executable plans for Excel operations.
@@ -236,6 +279,16 @@ COLUMN HEADERS (use these for charts!):
 SEMANTIC MATCHES (user terms mapped to actual headers):
 {semantic_matches}
 
+NUMERIC COLUMNS (safe Y-axis candidates for charts and aggregates):
+{numeric_columns}
+
+EXISTING FORMULAS IN THE SELECTION (do NOT overwrite these with literal values;
+use set_formulas to change a calculation):
+{existing_formulas}
+
+NUMBER FORMATS ALREADY IN USE:
+{number_formats}
+
 TABLE SCHEMA (deterministic context agent output):
 {schema_context}
 
@@ -246,13 +299,14 @@ DATA QUALITY PROFILE:
 
 {history_info}
 
-Reasoning analysis:
-{reasoning_output}
+{clarification_section}
 
 Available actions: get_workbook_structure, get_selected_range, get_range, get_sheet_data,
 set_values, set_formulas, apply_format, insert_rows, delete_rows, insert_columns,
 delete_columns, add_worksheet, delete_worksheet, create_table, sort_range, auto_fill, create_chart,
-conditional_format, find_replace, merge_cells, unmerge_cells, add_dropdown
+conditional_format, find_replace, merge_cells, unmerge_cells, add_dropdown,
+copy_range, auto_fit_columns, set_row_height, set_column_width, freeze_panes,
+add_comment, add_hyperlink, text_to_columns, remove_duplicates, create_pivot_table
 
 IMPORTANT - For creating tables with sample data:
 - First use set_values to write the header row and data rows
@@ -268,6 +322,27 @@ IMPORTANT - BORDERS:
 - When user asks for "border", "add border", "outer border", "all borders", "grid lines", "pivot style border" → use apply_format with border_all=true, border_color, border_style, border_style options: Continuous, Dash, Dot, DashDot, Double; weight options: Hairline, Thin, Medium, Thick; default: border_style="Continuous", border_weight="Thin", border_color="#000000"
 - Example: "add border" → apply_format with border_all=true, border_color="#000000", border_style="Continuous", border_weight="Thin"
 - Example: "thick border" → apply_format with border_all=true, border_weight="Thick"
+
+IMPORTANT - COPYING AND MOVING DATA:
+- "copy A1:D10 to Sheet2", "move this to another sheet", "duplicate the data" -> use copy_range
+- Params: source_address, target_address, source_sheet (optional), target_sheet (optional)
+- copy_range preserves values, formulas, and formatting - always prefer it over get_range + set_values
+
+IMPORTANT - PIVOT TABLES / SUMMARIES:
+- "pivot by region", "summarize sales by product", "aggregate by category" -> use create_pivot_table
+- Params: source_address, target_address, rows (array of field names), values (array of field names), columns (optional)
+- Field names must match the header row EXACTLY - use the COLUMN HEADERS section above
+- Example: source A1:D50, rows ["Region"], values ["Sales"], target "A1" -> writes a summary table
+
+IMPORTANT - LAYOUT AND ANNOTATION:
+- "make columns wider", "auto-fit", "fit the text" -> auto_fit_columns (optional address; omit to fit the whole sheet)
+- "make the header taller", "increase row height" -> set_row_height with address and points
+- "widen column B" -> set_column_width with address and points
+- "freeze the header row", "keep row 1 visible" -> freeze_panes with rows=1 (rows=2, columns=1 also freezes column A)
+- "add a note", "comment this cell" -> add_comment with address and text
+- "link to X", "add a hyperlink" -> add_hyperlink with address, url, and optional text
+- "split this column by comma", "separate the first and last name" -> text_to_columns with address and delimiter
+- "remove duplicate rows", "dedupe" -> remove_duplicates (treats row 1 as the header)
 
 IMPORTANT - CONDITIONAL FORMATTING:
 - When user says "highlight cells > 100", "color cells where value is negative", "red if less than 50" → use conditional_format
@@ -304,6 +379,9 @@ For charts (create_chart), use these params:
 - sheet_name: name of the sheet
 - title: descriptive chart title (e.g., "Revenue by Region" not "Chart 1")
 - position: {{"left": 300, "top": 50, "width": 400, "height": 300}} (optional, pixels from top-left)
+- Optional: show_legend (bool), legend_position ("Bottom"/"Right"/"Top"/"Left"), show_data_labels (bool),
+  x_axis_title, y_axis_title, gap_width, overlap, series_color
+- Stacked variants: "columnStacked", "columnStacked100", "barStacked", "barStacked100", "areaStacked", "lineMarkersStacked"
 
 CHART COLUMN SELECTION — use the COLUMN HEADERS and DATA QUALITY PROFILE above:
 - For bar/column charts: categorical column (X-axis) + numeric column (Y-axis)
@@ -316,6 +394,9 @@ CHART COLUMN SELECTION — use the COLUMN HEADERS and DATA QUALITY PROFILE above
 
 Respond with a JSON object ONLY:
 {{
+  "reasoning": "1-2 plain sentences on what you will do and why",
+  "needs_clarification": false,
+  "clarification_question": "",
   "plan": [
     {{
       "action": "tool_name",
@@ -326,6 +407,9 @@ Respond with a JSON object ONLY:
   ],
   "response": "Natural language summary for the user"
 }}
+
+REASONING FIELD:
+{reasoning_instruction}
 
 CONFIDENCE SCORING — assign a confidence score (0.0-1.0) to each step:
 - 0.90-1.00: High confidence — straightforward write/format with clear data and addresses
@@ -348,9 +432,11 @@ CRITICAL RULES — FOLLOW THESE EXACTLY:
 11. Be specific with cell ranges — match the selected range dimensions
 12. Keep it simple and correct
 13. WHEN GENERATING SAMPLE DATA: You MUST include the actual data in the "values" array. Example: "values": [["Name", "Age", "Gender"], ["John", 25, "Male"], ["Jane", 30, "Female"]]
-14. NEVER return empty values or placeholder text in the values array - always generate real data"""
+14. NEVER return empty values or placeholder text in the values array - always generate real data
+15. NEVER overwrite a cell listed in EXISTING FORMULAS with set_values - use set_formulas to change a calculation
+16. Use copy_range for any "copy/move/duplicate data to another sheet" request, never get_range + set_values
+17. For "sum by X" / "total per X" / "breakdown by X" use create_pivot_table instead of writing SUMIF formulas"""
 
-VALIDATOR_PROMPT = """You verify that Excel operations completed successfully and summarize what was done."""
 VALIDATOR_TASK = """Original request: {message}
 
 Planned approach:
@@ -360,6 +446,35 @@ Execution results:
 {results_str}
 
 Provide a clear, friendly summary of what was accomplished. Be specific about cell ranges and what changed."""
+
+
+REFLECTION_PROMPT = """You are a self-correction agent. Analyze failed Excel steps and create a recovery plan.
+
+Original user request: {message}
+
+Planned steps:
+{plan}
+
+Results:
+{results}
+
+DATA CONTEXT:
+Headers: {headers_context}
+Schema: {schema_context}
+
+Rules:
+1. Only create recovery steps for actions that FAILED (success: false)
+2. If table creation failed with "overlap", suggest a different approach (e.g. just write the data without a table, or use a different range)
+3. If set_values failed, fix the data dimensions to match the target range
+4. If a formula failed, use the column headers above to build correct references
+5. Keep recovery steps minimal - only fix what is broken
+6. Use the column headers above to create accurate cell references
+7. Return ONLY a valid JSON array of recovery steps
+
+Return format:
+[{{"action": "set_values", "params": {{"address": "A1", "values": [], "sheet_name": "Sheet1"}}, "description": "Retry with corrected data"}}]
+
+If no recovery is possible, return: []"""
 
 
 def compute_statistics(data: List[List[Any]]) -> dict:
@@ -553,62 +668,6 @@ def analyze_distribution(data: List[List[Any]]) -> dict:
         }
 
     return {"distribution": distribution}
-
-
-def _normalize_text(value: Any) -> str:
-    return str(value or "").strip().lower()
-
-
-def _tokenize(value: str) -> List[str]:
-    return [t for t in re.split(r"[^a-z0-9]+", value.lower()) if t]
-
-
-def _score_header_match(header: str, term: str) -> float:
-    h = _normalize_text(header)
-    t = _normalize_text(term)
-    if not h or not t:
-        return 0.0
-    if h == t:
-        return 1.0
-    if h in t or t in h:
-        return 0.85
-    h_tokens = _tokenize(h)
-    t_tokens = _tokenize(t)
-    if not h_tokens or not t_tokens:
-        return 0.0
-    overlap = len([x for x in h_tokens if x in t_tokens])
-    if overlap == 0:
-        return 0.0
-    return overlap / max(len(h_tokens), len(t_tokens))
-
-
-def _resolve_best_header_index(
-    headers: List[str], term: str, threshold: float = 0.55
-) -> Optional[int]:
-    best_idx = None
-    best_score = 0.0
-    for i, header in enumerate(headers):
-        s = _score_header_match(header, term)
-        if s > best_score:
-            best_score = s
-            best_idx = i
-    return best_idx if best_score >= threshold else None
-
-
-def _is_numeric_column(rows: List[List[Any]], col_idx: int) -> bool:
-    num_count = 0
-    cat_count = 0
-    sample_size = min(20, len(rows))
-    for i in range(sample_size):
-        val = rows[i][col_idx] if col_idx < len(rows[i]) else None
-        if val in (None, ""):
-            continue
-        cleaned = re.sub(r"[^0-9.\-]", "", str(val))
-        if cleaned and re.fullmatch(r"-?\d+(\.\d+)?", cleaned):
-            num_count += 1
-        else:
-            cat_count += 1
-    return num_count > cat_count
 
 
 def build_table_schema(data: List[List[Any]]) -> dict:
@@ -943,15 +1002,10 @@ def _compute_large_data_stats_basic(data: List[List[Any]]) -> dict:
 
 @app.post("/api/analyze-large")
 async def analyze_large_data(req: AnalyzeRequest):
-    """Analyze large datasets - handles 100k+ rows efficiently."""
-    try:
-        from crewai import Agent, Task, Crew, Process
+    """Analyze large datasets - stats computed locally, only the summary goes to the LLM."""
+    stats = compute_large_data_stats(req.data)
 
-        model = setup_env(req.provider, req.model, req.api_key)
-
-        stats = compute_large_data_stats(req.data)
-
-        ANALYSIS_TASK = f"""Analyze briefly (3-5 points max):
+    user = f"""Analyze briefly (3-5 points max):
 
 Rows: {stats.get("overview", {}).get("total_rows", "N/A")}
 Columns: {stats.get("overview", {}).get("total_columns", "N/A")}
@@ -963,332 +1017,18 @@ Answer: {req.question}
 
 Keep it short. No asterisks (*)."""
 
-        analyst = Agent(
-            role="Large Data Analyst",
-            goal="Analyze large datasets efficiently and provide insights",
-            backstory="""You are an expert at analyzing large datasets. 
-            You compute statistics efficiently without trying to process every row through the LLM.
-            You focus on aggregated insights and patterns rather than individual data points.""",
-            verbose=False,
-            allow_delegation=False,
-            llm=model,
-        )
+    output = await call_llm(
+        req.provider,
+        req.model,
+        req.api_key,
+        "You are an expert at analyzing large datasets. You compute statistics "
+        "efficiently without processing every row through the LLM. You focus on "
+        "aggregated insights and patterns rather than individual data points.",
+        user,
+        max_tokens=1500,
+    )
 
-        analysis_task = Task(
-            description=ANALYSIS_TASK,
-            expected_output="Clear insights from large dataset analysis.",
-            agent=analyst,
-        )
-
-        crew = Crew(
-            agents=[analyst],
-            tasks=[analysis_task],
-            process=Process.sequential,
-            verbose=False,
-        )
-
-        result = crew.kickoff()
-        output = str(result.raw) if hasattr(result, "raw") else str(result)
-
-        return {
-            "analysis": output,
-            "statistics": stats,
-        }
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-class ChartRequest(BaseModel):
-    data: List[List[Any]]
-    chart_type: str = "line"
-    title: str = "Chart"
-    x_column: Optional[str] = None
-    y_column: Optional[str] = None
-    column_name: Optional[str] = None
-
-
-def generate_single_chart(
-    data: List[List[Any]],
-    chart_type: str,
-    title: str,
-    column_name: Optional[str] = None,
-) -> Optional[str]:
-    """Generate a single chart and return base64 image."""
-    try:
-        import matplotlib
-
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
-
-        if not data or len(data) < 2:
-            return None
-
-        headers = data[0]
-        rows = data[1:]
-
-        sample_size = min(1000, len(rows))
-        step = max(1, len(rows) // sample_size)
-        sampled_rows = rows[::step]
-
-        fig, ax = plt.subplots(figsize=(10, 6))
-
-        if chart_type == "pie" and column_name:
-            try:
-                col_idx = headers.index(column_name)
-                values = [
-                    row[col_idx]
-                    for row in sampled_rows
-                    if col_idx < len(row) and row[col_idx] is not None
-                ]
-
-                from collections import Counter
-
-                counts = Counter([str(v) for v in values])
-                labels = list(counts.keys())
-                sizes = list(counts.values())
-
-                colors = plt.cm.Set3.colors[: len(labels)]
-                ax.pie(
-                    sizes,
-                    labels=labels,
-                    colors=colors,
-                    autopct="%1.1f%%",
-                    startangle=90,
-                    textprops={"fontsize": 9},
-                )
-                ax.set_title(title, fontsize=14, fontweight="bold", pad=20)
-            except Exception as e:
-                print(f"Pie chart error: {e}")
-                return None
-
-        elif chart_type == "bar":
-            if column_name:
-                try:
-                    col_idx = headers.index(column_name)
-                    values = [
-                        row[col_idx]
-                        for row in sampled_rows
-                        if col_idx < len(row) and row[col_idx] is not None
-                    ]
-
-                    if all(
-                        isinstance(v, (int, float))
-                        or (
-                            isinstance(v, str)
-                            and v.replace(".", "").replace("-", "").isdigit()
-                        )
-                        for v in values
-                        if v is not None
-                    ):
-                        numeric_values = []
-                        for v in values:
-                            try:
-                                numeric_values.append(
-                                    float(
-                                        str(v)
-                                        .replace(",", "")
-                                        .replace("₹", "")
-                                        .replace("$", "")
-                                        .strip()
-                                    )
-                                )
-                            except:
-                                numeric_values.append(0)
-
-                        ax.bar(
-                            range(len(numeric_values)),
-                            numeric_values,
-                            color="#217346",
-                            alpha=0.8,
-                        )
-                        ax.set_title(title, fontsize=14, fontweight="bold")
-                        ax.set_xlabel("Index", fontsize=10)
-                        ax.set_ylabel(column_name, fontsize=10)
-                        ax.grid(True, alpha=0.3, axis="y")
-                    else:
-                        from collections import Counter
-
-                        counts = Counter([str(v) for v in values])
-                        labels = list(counts.keys())[:15]
-                        sizes = [counts[l] for l in labels]
-
-                        ax.bar(labels, sizes, color="#217346", alpha=0.8)
-                        ax.set_title(title, fontsize=14, fontweight="bold")
-                        ax.set_xlabel(column_name, fontsize=10)
-                        ax.set_ylabel("Count", fontsize=10)
-                        ax.tick_params(axis="x", rotation=45)
-                        ax.grid(True, alpha=0.3, axis="y")
-                except Exception as e:
-                    print(f"Bar chart error: {e}")
-                    return None
-            else:
-                if len(headers) >= 2:
-                    y_data = []
-                    for row in sampled_rows:
-                        if len(row) > 1:
-                            try:
-                                y_data.append(
-                                    float(
-                                        str(row[1])
-                                        .replace(",", "")
-                                        .replace("₹", "")
-                                        .replace("$", "")
-                                        .strip()
-                                    )
-                                )
-                            except:
-                                y_data.append(0)
-
-                    ax.bar(range(len(y_data)), y_data, color="#217346", alpha=0.8)
-                    ax.set_title(title, fontsize=14, fontweight="bold")
-                    ax.set_xlabel("Index", fontsize=10)
-                    ax.set_ylabel(
-                        headers[1] if len(headers) > 1 else "Value", fontsize=10
-                    )
-                    ax.grid(True, alpha=0.3, axis="y")
-        else:
-            if column_name:
-                try:
-                    col_idx = headers.index(column_name)
-                    values = [
-                        row[col_idx]
-                        for row in sampled_rows
-                        if col_idx < len(row) and row[col_idx] is not None
-                    ]
-                    numeric_values = []
-                    for v in values:
-                        try:
-                            numeric_values.append(
-                                float(
-                                    str(v)
-                                    .replace(",", "")
-                                    .replace("₹", "")
-                                    .replace("$", "")
-                                    .strip()
-                                )
-                            )
-                        except:
-                            numeric_values.append(0)
-
-                    ax.plot(numeric_values, color="#217346", linewidth=0.8, alpha=0.8)
-                    ax.set_title(title, fontsize=14, fontweight="bold")
-                    ax.set_xlabel("Index", fontsize=10)
-                    ax.set_ylabel(column_name, fontsize=10)
-                    ax.grid(True, alpha=0.3)
-                except:
-                    return None
-            else:
-                if len(headers) >= 2:
-                    y_data = []
-                    for row in sampled_rows:
-                        if len(row) > 1:
-                            try:
-                                y_data.append(
-                                    float(
-                                        str(row[1])
-                                        .replace(",", "")
-                                        .replace("₹", "")
-                                        .replace("$", "")
-                                        .strip()
-                                    )
-                                )
-                            except:
-                                y_data.append(0)
-
-                    ax.plot(y_data, color="#217346", linewidth=0.8, alpha=0.8)
-                    ax.set_title(title, fontsize=14, fontweight="bold")
-                    ax.grid(True, alpha=0.3)
-
-        plt.tight_layout()
-
-        buf = io.BytesIO()
-        plt.savefig(buf, format="png", dpi=100, bbox_inches="tight")
-        plt.close()
-
-        buf.seek(0)
-        img_base64 = base64.b64encode(buf.read()).decode()
-
-        return f"data:image/png;base64,{img_base64}"
-
-    except Exception as e:
-        print(f"Chart generation error: {e}")
-        return None
-
-
-@app.post("/api/generate-chart")
-async def generate_chart(req: ChartRequest):
-    """Generate chart from data - samples large data automatically."""
-    try:
-        chart_image = generate_single_chart(
-            req.data, req.chart_type, req.title, req.column_name
-        )
-
-        if chart_image:
-            return {
-                "chart_image": chart_image,
-                "sampled_points": min(1000, len(req.data) - 1),
-                "total_rows": len(req.data) - 1,
-                "chart_type": req.chart_type,
-            }
-        else:
-            return {"error": "Failed to generate chart"}
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.post("/api/generate-charts")
-async def generate_charts(req: ChartRequest):
-    """Generate multiple charts from data."""
-    try:
-        charts = []
-
-        if req.chart_type == "pie" and req.column_name:
-            img = generate_single_chart(req.data, "pie", req.title, req.column_name)
-            if img:
-                charts.append(
-                    {
-                        "type": "pie",
-                        "title": req.title,
-                        "image": img,
-                        "column": req.column_name,
-                    }
-                )
-
-        elif req.chart_type == "bar":
-            if req.column_name:
-                img = generate_single_chart(req.data, "bar", req.title, req.column_name)
-                if img:
-                    charts.append(
-                        {
-                            "type": "bar",
-                            "title": req.title,
-                            "image": img,
-                            "column": req.column_name,
-                        }
-                    )
-            else:
-                headers = req.data[0] if len(req.data) > 0 else []
-                for col_idx in range(1, min(len(headers), 5)):
-                    col_name = headers[col_idx]
-                    img = generate_single_chart(
-                        req.data, "bar", f"{col_name} Distribution", col_name
-                    )
-                    if img:
-                        charts.append(
-                            {
-                                "type": "bar",
-                                "title": f"{col_name} Distribution",
-                                "image": img,
-                                "column": col_name,
-                            }
-                        )
-
-        return {"charts": charts, "total_rows": len(req.data) - 1}
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    return {"analysis": output, "statistics": stats}
 
 
 def _generate_sample_data(data_type: str, count: int) -> tuple:
@@ -1657,361 +1397,299 @@ async def generate_data(req: GenerateDataRequest):
 
 @app.post("/api/chat")
 async def chat(req: ChatRequest):
+    """Plan an Excel request.
+
+    One LLM call produces reasoning, a clarification verdict, and the plan.
+    Previously three sequential CrewAI agents produced the same three outputs.
+    """
+    context = build_planner_context(req)
+    want_reasoning = req.enable_reasoning is not False
+
+    user = TASK_DESCRIPTION.format(
+        message=req.message,
+        context_info=context["context_info"],
+        selected_info=context["selected_info"],
+        workbook_metadata_info=context["workbook_metadata_info"],
+        headers_context=context["headers_context"] or "No column headers available",
+        semantic_matches=context["semantic_matches"] or "No semantic matches found",
+        numeric_columns=context["numeric_columns"] or "No numeric columns detected",
+        existing_formulas=context["existing_formulas"] or "None - selection has no formulas",
+        number_formats=context["number_formats"] or "None - all cells use General format",
+        schema_context=context["schema_context"] or "No schema available",
+        data_profile=context["data_profile"] or "No data to profile",
+        memory_info=context["memory_info"],
+        history_info=context["history_info"],
+        clarification_section=(
+            CLARIFICATION_PROMPT if context["selected_range_address"] else ""
+        ),
+        reasoning_instruction=(
+            "Include a \"reasoning\" field: 1-2 plain sentences on what you will do and why, "
+            "using \"I will...\". No markdown, no asterisks, no manual Excel steps."
+            if want_reasoning
+            else 'Set "reasoning" to an empty string.'
+        ),
+    )
+
     try:
-        from crewai import Agent, Task, Crew, Process
-
-        model = setup_env(req.provider, req.model, req.api_key)
-
-        # Extract headers and schema context from selected_range for intelligent planning
-        headers_context = ""
-        schema_context = ""
-        data_profile = ""
-        semantic_matches = ""
-        if req.selected_range:
-            try:
-                import json
-
-                # Handle both string (old) and object (new) formats
-                sr = req.selected_range
-                if isinstance(sr, str):
-                    try:
-                        sr = json.loads(sr)
-                    except:
-                        sr = None
-
-                if sr and isinstance(sr, dict):
-                    values = sr.get("values", [])
-                    sheet_name = sr.get("sheetName", "Sheet")
-                    address = sr.get("address", "")
-
-                    if values and len(values) > 0:
-                        headers = values[0] if values[0] else []
-                        header_names = [h for h in headers if h]
-                        if header_names:
-                            headers_context = f"Sheet '{sheet_name}' columns ({len(header_names)}): {', '.join(header_names)}\nData range: {address}"
-                        schema = build_table_schema(values)
-                        schema_context = json.dumps(schema, ensure_ascii=False)
-                        # Deep data profiling for planner
-                        data_profile = profile_data(values)
-                        # Semantic column resolution
-                        semantic_matches = resolve_semantic_matches(req.message, header_names)
-            except Exception as e:
-                pass  # Keep silent if extraction fails
-
-        context_info = (
-            f"Workbook context: {req.workbook_context}" if req.workbook_context else ""
+        raw = await call_llm(
+            req.provider,
+            req.model,
+            req.api_key,
+            SYSTEM_PROMPT,
+            user,
+            max_tokens=8192,
         )
-        selected_info = (
-            f"Selected range: {req.selected_range}" if req.selected_range else ""
-        )
-        memory_info = (
-            f"Memory context:\n{req.memory_context}" if req.memory_context else ""
-        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
-        # Build workbook metadata context (full workbook structure awareness)
-        workbook_metadata_info = ""
-        if req.workbook_metadata:
-            try:
-                wm = req.workbook_metadata
-                if isinstance(wm, str):
-                    wm = json.loads(wm)
-                if isinstance(wm, dict):
-                    sheets = wm.get("sheets", [])
-                    tables = wm.get("tables", [])
-                    named_ranges = wm.get("namedRanges", [])
-                    prescan = wm.get("prescan", [])
-                    active = wm.get("activeSheet", "")
-                    lines = [f"WORKBOOK STRUCTURE ({len(sheets)} sheets, active: {active}):"]
-                    for s in sheets:
-                        hdrs = ", ".join(s.get("headers", [])[:8])
-                        lines.append(f"  {s['name']}: {s['rowCount']} rows x {s['columnCount']} cols — headers: [{hdrs}]")
-                    if tables:
-                        lines.append("TABLES:")
-                        for t in tables:
-                            lines.append(f"  {t['name']} on {t['sheetName']}: {t['rowCount']} rows, columns: {', '.join(t.get('columns', [])[:6])}")
-                    if named_ranges:
-                        lines.append("NAMED RANGES:")
-                        for n in named_ranges:
-                            lines.append(f"  {n['name']} → {n.get('address', 'N/A')}")
-                    if prescan:
-                        lines.append("CROSS-SHEET PRESCAN (data from referenced sheets):")
-                        for ps in prescan:
-                            hdrs = ", ".join(ps.get("headers", [])[:8])
-                            lines.append(f"  {ps['sheetName']} ({ps.get('totalRows', '?')} rows): headers=[{hdrs}]")
-                            for row in ps.get("sampleRows", []):
-                                lines.append(f"    sample: {json.dumps(row, ensure_ascii=False)[:200]}")
-                    workbook_metadata_info = "\n".join(lines)
-            except Exception:
-                pass
+    parsed = extract_json_object(raw) or {}
 
-        # Build conversation history for multi-turn context
-        history_info = ""
-        if req.conversation_history and len(req.conversation_history) > 0:
-            recent = req.conversation_history[-10:]  # Last 5 exchanges (10 messages)
-            history_lines = []
-            for msg in recent:
-                role = msg.get("role", "user")
-                content = str(msg.get("content", ""))[:600]  # Truncate long messages
-                if role == "user":
-                    history_lines.append(f"User: {content}")
-                elif role == "assistant":
-                    history_lines.append(f"Assistant: {content}")
-            if history_lines:
-                history_info = "RECENT CONVERSATION:\n" + "\n".join(history_lines)
+    reasoning = str(parsed.get("reasoning") or "").replace("*", "").strip()
 
-        # Only run reasoning agent if enabled
-        reasoning = ""
-        if req.enable_reasoning or req.enable_reasoning is None:
-            reasoner = Agent(
-                role="Excel Reasoning Agent",
-                goal="Understand what user wants and explain the approach in clear, concise way",
-                backstory="""You are a thoughtful Excel assistant. Your job is to understand user requests quickly and explain your thinking in simple, jargon-free language. 
+    async def generate():
+        if reasoning:
+            yield _sse({"type": "reasoning", "content": reasoning})
 
-IMPORTANT:
-- Keep responses short and clear (2-4 sentences for summary, 3-4 bullet points for approach)
-- Use plain language, no technical jargon
-- No asterisks or markdown formatting
-- Focus on what user wants, not implementation details
-- If request is simple (like "sum A1:A10"), just say what you'll do in one sentence
-- If complex (like "analyze 1000 rows and make chart"), break into clear steps""",
-                verbose=False,
-                allow_delegation=False,
-                llm=model,
+        if parsed.get("needs_clarification"):
+            yield _sse(
+                {
+                    "type": "clarification",
+                    "content": parsed.get(
+                        "clarification_question",
+                        "Could you be more specific about what you'd like me to do?",
+                    ),
+                }
             )
+            return
 
-            reasoning_task = Task(
-                description=f"""Analyze this user request briefly:
-
-User: {req.message}
-{context_info}
-{selected_info}
-{history_info}
-{memory_info}
-
-COLUMN HEADERS: {headers_context or "No column headers available"}
-TABLE SCHEMA: {schema_context or "No schema available"}
-
-IMPORTANT - Describe what YOU will do, NOT manual steps:
-- Say "I will apply...", "I'll format...", "I'll create..." 
-- NEVER say "Go to" or "click" or "select" (that's manual work)
-- Example: "I will add black borders to B7:C11 using apply_format"
-
-Explain:
-1. What user wants (1 sentence)
-2. What you will do (agentic steps)
-3. Any notes
-
-No asterisks or markdown.""",
-                expected_output="Short explanation, no markdown",
-                agent=reasoner,
-            )
-
-            reasoning_crew = Crew(
-                agents=[reasoner],
-                tasks=[reasoning_task],
-                process=Process.sequential,
-                verbose=False,
-            )
-
-            reasoning_result = reasoning_crew.kickoff()
-            reasoning = (
-                str(reasoning_result.raw)
-                if hasattr(reasoning_result, "raw")
-                else str(reasoning_result)
-            )
-            reasoning = reasoning.replace("*", "").strip()
-
-        async def generate():
-            yield f"data: {json.dumps({'type': 'reasoning', 'content': reasoning})}\n\n"
-
-            # Clarification Agent: detect ambiguous requests before planning
-            clarification_context = f"""User request: {req.message}
-{selected_info}
-{headers_context}
-Reasoning: {reasoning if reasoning else "No reasoning"}
-
-Is this request clear enough to create a plan, or does it need clarification?"""
-
-            try:
-                clarifier = Agent(
-                    role="Clarification Agent",
-                    goal="Detect ambiguous requests and ask clarifying questions instead of guessing",
-                    backstory=CLARIFICATION_PROMPT,
-                    verbose=False,
-                    allow_delegation=False,
-                    llm=model,
-                )
-
-                clarify_task = Task(
-                    description=clarification_context,
-                    expected_output="A JSON object with needs_clarification (bool) and optionally question (string).",
-                    agent=clarifier,
-                )
-
-                clarify_crew = Crew(
-                    agents=[clarifier],
-                    tasks=[clarify_task],
-                    process=Process.sequential,
-                    verbose=False,
-                )
-
-                clarify_result = clarify_crew.kickoff()
-                clarify_output = (
-                    str(clarify_result.raw)
-                    if hasattr(clarify_result, "raw")
-                    else str(clarify_result)
-                )
-
-                # Parse clarification response
-                clarify_json_match = re.search(r"\{.*\}", clarify_output, re.DOTALL)
-                if clarify_json_match:
-                    clarify_parsed = json.loads(clarify_json_match.group())
-                    if clarify_parsed.get("needs_clarification"):
-                        question = clarify_parsed.get(
-                            "question",
-                            "Could you be more specific about what you'd like me to do?",
-                        )
-                        yield f"data: {json.dumps({'type': 'clarification', 'content': question})}\n\n"
-                        return
-            except Exception as clarify_err:
-                print(f"Clarification agent error: {clarify_err}")
-                # Continue to planning if clarification fails
-
-            planner = Agent(
-                role="Excel Task Planner",
-                goal="Create a precise, step-by-step JSON plan for Excel operations",
-                backstory=SYSTEM_PROMPT,
-                verbose=False,
-                allow_delegation=False,
-                llm=model,
-            )
-
-            plan_task = Task(
-                description=TASK_DESCRIPTION.format(
-                    message=req.message,
-                    context_info=context_info,
-                    selected_info=selected_info,
-                    workbook_metadata_info=workbook_metadata_info or "No workbook metadata available",
-                    headers_context=headers_context,
-                    semantic_matches=semantic_matches or "No semantic matches found",
-                    schema_context=schema_context or "No schema available",
-                    data_profile=data_profile or "No data to profile",
-                    memory_info=memory_info,
-                    history_info=history_info,
-                    reasoning_output=reasoning
-                    if reasoning
-                    else "No reasoning available",
-                ),
-                expected_output="A JSON object with 'plan' array and 'response' string.",
-                agent=planner,
-            )
-
-            crew = Crew(
-                agents=[planner],
-                tasks=[plan_task],
-                process=Process.sequential,
-                verbose=False,
-            )
-
-            result = crew.kickoff()
-            output = str(result.raw) if hasattr(result, "raw") else str(result)
-
+        plan = parsed.get("plan") or []
+        if not isinstance(plan, list):
             plan = []
-            response_text = output
 
+        yield _sse(
+            {
+                "type": "plan",
+                "plan": plan,
+                "content": parsed.get("response") or "",
+            }
+        )
+
+    return StreamingResponse(generate(), media_type="text/event-stream")
+
+
+def _sse(payload: dict) -> str:
+    return f"data: {json.dumps(payload)}\n\n"
+
+
+def extract_json_object(raw: str) -> Optional[dict]:
+    """Pull the first balanced JSON object out of an LLM response."""
+    start = raw.find("{")
+    if start < 0:
+        return None
+    depth = 0
+    in_string = False
+    escaped = False
+    for i in range(start, len(raw)):
+        ch = raw[i]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_string = False
+            continue
+        if ch == '"':
+            in_string = True
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                try:
+                    return json.loads(raw[start : i + 1])
+                except json.JSONDecodeError:
+                    return None
+    return None
+
+
+def _selected_range_payload(req: ChatRequest) -> Optional[dict]:
+    sr = req.selected_range
+    if isinstance(sr, str):
+        try:
+            sr = json.loads(sr)
+        except json.JSONDecodeError:
+            logger.warning("selected_range is not valid JSON; planner gets no range context")
+            return None
+    return sr if isinstance(sr, dict) else None
+
+
+def build_planner_context(req: ChatRequest) -> dict:
+    """Assemble every planner input. Returns strings, never raises."""
+    ctx = {
+        "headers_context": "",
+        "schema_context": "",
+        "data_profile": "",
+        "semantic_matches": "",
+        "numeric_columns": "",
+        "existing_formulas": "",
+        "number_formats": "",
+        "selected_range_address": "",
+        "context_info": "",
+        "selected_info": "",
+        "memory_info": "",
+        "workbook_metadata_info": "",
+        "history_info": "",
+    }
+
+    sr = _selected_range_payload(req)
+    if sr:
+        address = str(sr.get("address") or "")
+        sheet_name = str(sr.get("sheetName") or "")
+        ctx["selected_range_address"] = address
+        ctx["selected_info"] = (
+            f"Selected range: {address} on sheet '{sheet_name}' "
+            f"({sr.get('rowCount', '?')} rows x {sr.get('columnCount', '?')} cols)"
+            if address
+            else ""
+        )
+
+        values = sr.get("values") or []
+        if values and values[0]:
+            header_names = [str(h).strip() for h in values[0] if h]
+            if header_names:
+                ctx["headers_context"] = (
+                    f"Sheet '{sheet_name}' columns ({len(header_names)}): "
+                    f"{', '.join(header_names)}\nData range: {address}"
+                )
             try:
-                json_start = output.find("{")
-                json_end = output.rfind("}") + 1
-                if json_start >= 0 and json_end > json_start:
-                    parsed = json.loads(output[json_start:json_end])
-                    plan = parsed.get("plan", [])
-                    response_text = parsed.get("response", output)
-            except:
-                response_text = output
+                ctx["schema_context"] = json.dumps(
+                    build_table_schema(values), ensure_ascii=False
+                )
+                ctx["data_profile"] = profile_data(values)
+                ctx["semantic_matches"] = resolve_semantic_matches(
+                    req.message, header_names
+                )
+                ctx["numeric_columns"] = _numeric_column_list(values, header_names)
+                ctx["existing_formulas"] = _format_formula_context(sr)
+                ctx["number_formats"] = _format_number_formats(sr)
+            except Exception:
+                logger.exception("failed to profile selected range")
 
-            yield f"data: {json.dumps({'type': 'plan', 'plan': plan, 'content': response_text})}\n\n"
+    if req.workbook_context:
+        ctx["context_info"] = f"Workbook context: {req.workbook_context}"
+    if req.memory_context:
+        ctx["memory_info"] = f"Memory context:\n{req.memory_context}"
 
-        return StreamingResponse(generate(), media_type="text/event-stream")
+    if req.workbook_metadata:
+        try:
+            wm = req.workbook_metadata
+            if isinstance(wm, str):
+                wm = json.loads(wm)
+            if isinstance(wm, dict):
+                ctx["workbook_metadata_info"] = _format_workbook_metadata(wm)
+        except Exception:
+            logger.exception("failed to parse workbook_metadata")
 
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    if req.conversation_history:
+        lines = []
+        for msg in req.conversation_history[-10:]:
+            role = msg.get("role", "user")
+            content = str(msg.get("content", ""))[:600]
+            if role in ("user", "assistant"):
+                lines.append(f"{role.capitalize()}: {content}")
+        if lines:
+            ctx["history_info"] = "RECENT CONVERSATION:\n" + "\n".join(lines)
+
+    return ctx
+
+
+def _format_workbook_metadata(wm: dict) -> str:
+    sheets = wm.get("sheets", []) or []
+    lines = [
+        f"WORKBOOK STRUCTURE ({len(sheets)} sheets, active: {wm.get('activeSheet', '')}):"
+    ]
+    for sh in sheets:
+        hdrs = ", ".join(sh.get("headers", [])[:8])
+        lines.append(
+            f"  {sh.get('name')}: {sh.get('rowCount', '?')} rows x "
+            f"{sh.get('columnCount', '?')} cols - headers: [{hdrs}]"
+        )
+
+    for t in wm.get("tables", []) or []:
+        cols = ", ".join(t.get("columns", [])[:6])
+        lines.append(
+            f"TABLE: {t.get('name')} on {t.get('sheetName')}: "
+            f"{t.get('rowCount', '?')} rows, columns: {cols}"
+        )
+
+    for n in wm.get("namedRanges", []) or []:
+        lines.append(f"NAMED RANGE: {n.get('name')} -> {n.get('address', 'N/A')}")
+
+    prescan = wm.get("prescan", []) or []
+    if prescan:
+        lines.append("CROSS-SHEET PRESCAN (data from referenced sheets):")
+        for ps in prescan:
+            hdrs = ", ".join(ps.get("headers", [])[:8])
+            lines.append(
+                f"  {ps.get('sheetName')} ({ps.get('totalRows', '?')} rows): headers=[{hdrs}]"
+            )
+            for row in ps.get("sampleRows", []) or []:
+                lines.append(f"    sample: {json.dumps(row, ensure_ascii=False)[:200]}")
+
+    return "\n".join(lines)
 
 
 @app.post("/api/execute")
 async def execute_plan(req: ExecuteRequest):
+    """Summarise execution results."""
+    results_str = json.dumps(req.results, indent=2)
+    plan_str = (
+        "\n".join(
+            f"{i + 1}. {st.get('action', 'unknown')}: {st.get('description', '')}"
+            for i, st in enumerate(req.plan)
+        )
+        or "No plan available"
+    )
+
     try:
-        from crewai import Agent, Task, Crew, Process
-
-        model = setup_env(req.provider, req.model, req.api_key)
-
-        validator = Agent(
-            role="Excel Validator",
-            goal="Review execution results and provide a clear summary",
-            backstory=VALIDATOR_PROMPT,
-            verbose=True,
-            allow_delegation=False,
-            llm=model,
-        )
-
-        results_str = json.dumps(req.results, indent=2)
-        plan_str = (
-            "\n".join(
-                [
-                    f"{i + 1}. {s.get('action', 'unknown')}: {s.get('description', '')}"
-                    for i, s in enumerate(req.plan)
-                ]
-            )
-            if req.plan
-            else "No plan available"
-        )
-
-        validate_task = Task(
-            description=VALIDATOR_TASK.format(
+        output = await call_llm(
+            req.provider,
+            req.model,
+            req.api_key,
+            "You verify that Excel operations completed successfully and summarize "
+            "what was done. Be specific about cell ranges and what changed.",
+            VALIDATOR_TASK.format(
                 message=req.message, plan_info=plan_str, results_str=results_str
             ),
-            expected_output="A clear user-friendly summary.",
-            agent=validator,
+            max_tokens=1200,
         )
-
-        crew = Crew(
-            agents=[validator],
-            tasks=[validate_task],
-            process=Process.sequential,
-            verbose=True,
+    except RuntimeError as exc:
+        # Summarisation is cosmetic: never fail the user's actual work over it
+        logger.warning("validator LLM failed, using raw summary: %s", exc)
+        failed = [r for r in req.results if not r.get("success")]
+        output = (
+            f"Completed {len(req.results) - len(failed)} of {len(req.results)} steps."
+            if failed
+            else f"Completed all {len(req.results)} steps."
         )
+        if failed:
+            output += " Failed: " + "; ".join(
+                f"{r.get('action')}: {str(r.get('output', ''))[:120]}" for r in failed
+            )
 
-        result = crew.kickoff()
-        output = str(result.raw) if hasattr(result, "raw") else str(result)
-
-        return {"content": output}
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    return {"content": output}
 
 
 @app.post("/api/analyze")
 async def analyze_data(req: AnalyzeRequest):
-    try:
-        from crewai import Agent, Task, Crew, Process
+    """Compute stats/trends/outliers locally, send only the summary to the LLM."""
+    stats = compute_statistics(req.data)
+    trends = find_trends(req.data)
+    outliers = detect_outliers(req.data)
+    distribution = analyze_distribution(req.data)
 
-        model = setup_env(req.provider, req.model, req.api_key)
-
-        stats = compute_statistics(req.data)
-        trends = find_trends(req.data)
-        outliers = detect_outliers(req.data)
-        distribution = analyze_distribution(req.data)
-
-        analysis_results = {
-            "statistics": stats,
-            "trends": trends,
-            "outliers": outliers,
-            "distribution": distribution,
-        }
-
-        ANALYSIS_AGENT_PROMPT = (
-            """You are a concise data analyst. Give brief, point-wise insights."""
-        )
-        ANALYSIS_TASK = f"""Analyze briefly (3-5 points max):
+    user = f"""Analyze briefly (3-5 points max):
 
 Headers: {req.headers}
 Data: {len(req.data)} rows
@@ -2024,344 +1702,25 @@ Keep it short, no asterisks (*).
 
 At the end, mention which 2 columns would make a good chart (e.g., "Team vs Total Titles")."""
 
-        analyst = Agent(
-            role="Data Analyst",
-            goal="Provide clear data insights and answer analytical questions",
-            backstory=ANALYSIS_AGENT_PROMPT,
-            verbose=False,
-            allow_delegation=False,
-            llm=model,
-        )
-
-        analysis_task = Task(
-            description=ANALYSIS_TASK,
-            expected_output="Clear analytical insights in natural language.",
-            agent=analyst,
-        )
-
-        crew = Crew(
-            agents=[analyst],
-            tasks=[analysis_task],
-            process=Process.sequential,
-            verbose=False,
-        )
-
-        result = crew.kickoff()
-        output = str(result.raw) if hasattr(result, "raw") else str(result)
-
-        return {
-            "analysis": output,
-            "statistics": stats,
-            "trends": trends.get("trends", {}),
-            "outliers": outliers.get("outliers", {}),
-            "distribution": distribution.get("distribution", {}),
-        }
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.post("/api/resolve-chart-intent")
-async def resolve_chart_intent(req: ChartIntentRequest):
     try:
-        if not req.data or len(req.data) < 2:
-            return {
-                "needs_clarification": True,
-                "reason": "Need at least headers and one data row",
-            }
-
-        headers = req.headers or req.data[0] or []
-        headers = [str(h).strip() if h is not None else "" for h in headers]
-        rows = req.data[1:] if len(req.data) > 1 else []
-        if len(headers) < 2:
-            return {
-                "needs_clarification": True,
-                "reason": "Need at least two columns for charting",
-            }
-
-        raw_message = req.question or ""
-        message = _normalize_text(raw_message)
-        chart_type = "column"
-        if re.search(r"\bpie\s*chart\b|\bpie\b", message):
-            chart_type = "pie"
-        elif re.search(r"\bline\s*chart\b|\btrend\b|\bline\b", message):
-            chart_type = "line"
-        elif re.search(r"\bbar\s*chart\b|\bbar\s*graph\b|\bbar\b", message):
-            chart_type = "column"
-
-        start_col_index = req.start_col_index or 0
-        scores = [0 for _ in headers]
-        picked = set()
-
-        # 1) Exact header mention
-        for i, h in enumerate(headers):
-            if not h:
-                continue
-            if re.search(rf"\b{re.escape(h.lower())}\b", message):
-                scores[i] += 5
-                picked.add(i)
-
-        # 2) Explicit column letter references in "column b and d" style
-        explicit_tokens = set()
-        forward = re.compile(
-            r"\bcolumn[s]?\s+([a-z]{1,3}(?:\s*(?:,|and|&)\s*[a-z]{1,3})*)\b",
-            re.IGNORECASE,
+        output = await call_llm(
+            req.provider,
+            req.model,
+            req.api_key,
+            "You are a concise data analyst. Give brief, point-wise insights.",
+            user,
+            max_tokens=1500,
         )
-        reverse = re.compile(
-            r"\b([a-z]{1,3}(?:\s*(?:,|and|&)\s*[a-z]{1,3})+)\s+column[s]?\b",
-            re.IGNORECASE,
-        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
-        def collect_tokens(group_text: str):
-            parts = re.split(r"\s*(?:,|and|&)\s*", group_text.lower())
-            for part in parts:
-                token = part.strip()
-                if re.fullmatch(r"[a-z]{1,3}", token):
-                    explicit_tokens.add(token)
-
-        for m in forward.finditer(message):
-            collect_tokens(m.group(1))
-        for m in reverse.finditer(message):
-            collect_tokens(m.group(1))
-
-        def col_label_to_index(label: str) -> int:
-            n = 0
-            for ch in label.upper():
-                n = n * 26 + (ord(ch) - 64)
-            return n - 1
-
-        for token in explicit_tokens:
-            absolute = col_label_to_index(token)
-            relative = absolute - start_col_index
-            if 0 <= relative < len(headers):
-                scores[relative] += 4
-                picked.add(relative)
-
-        # 3) Phrase-level extraction: "for X and Y", "X vs Y", "X by Y"
-        terms = []
-        phrase = re.search(
-            r"(?:for|plot|graph|chart)\s+(.+?)\s+(?:and|vs|versus|by)\s+(.+?)(?:$|[,.!?])",
-            message,
-        )
-        if phrase:
-            terms.extend([phrase.group(1).strip(), phrase.group(2).strip()])
-        else:
-            pair = re.search(
-                r"(.+?)\s+(?:vs|versus|and|by)\s+(.+?)(?:$|[,.!?])", message
-            )
-            if pair:
-                terms.extend([pair.group(1).strip(), pair.group(2).strip()])
-
-        # Multi-pair extraction for requests like:
-        # "Pie chart: Category + Sales, Region + Sales"
-        # or numbered lines with multiple pairs.
-        multi_pairs: List[List[str]] = []
-        normalized_lines = []
-        for line in raw_message.splitlines():
-            cleaned = re.sub(r"^\s*[\d]+[\)\.\-:]*\s*", "", line.strip())
-            if cleaned:
-                normalized_lines.append(cleaned)
-        if not normalized_lines:
-            normalized_lines = [raw_message]
-
-        for line in normalized_lines:
-            line_l = line.lower()
-            # Explicit plus pairs
-            for m in re.finditer(
-                r"([a-z0-9][a-z0-9 _/-]{0,40})\s*\+\s*([a-z0-9][a-z0-9 _/-]{0,40})",
-                line_l,
-            ):
-                multi_pairs.append([m.group(1).strip(), m.group(2).strip()])
-            # "x and y / x vs y / x by y" pairs
-            for m in re.finditer(
-                r"([a-z0-9][a-z0-9 _/-]{0,40})\s+(and|vs|versus|by)\s+([a-z0-9][a-z0-9 _/-]{0,40})",
-                line_l,
-            ):
-                left = m.group(1).strip()
-                right = m.group(3).strip()
-                if left not in {
-                    "make",
-                    "create",
-                    "use",
-                    "chart",
-                    "pie",
-                    "bar",
-                    "line",
-                } and right not in {"chart"}:
-                    multi_pairs.append([left, right])
-
-        # Deduplicate and keep high-signal pairs
-        pair_seen = set()
-        cleaned_pairs: List[List[str]] = []
-        noise_terms = {
-            "pie",
-            "bar",
-            "line",
-            "chart",
-            "graph",
-            "plot",
-            "use",
-            "make",
-            "create",
-        }
-        for left, right in multi_pairs:
-            l = left.strip(" -:,.")
-            r = right.strip(" -:,.")
-            if not l or not r:
-                continue
-            if l in noise_terms or r in noise_terms:
-                continue
-            key = (l, r)
-            if key not in pair_seen:
-                pair_seen.add(key)
-                cleaned_pairs.append([l, r])
-
-        for term in terms:
-            idx = _resolve_best_header_index(headers, term, threshold=0.55)
-            if idx is not None:
-                scores[idx] += 3
-                picked.add(idx)
-
-        # 4) Token fallback
-        skip_words = {
-            "bar",
-            "graph",
-            "chart",
-            "pie",
-            "line",
-            "make",
-            "create",
-            "show",
-            "display",
-            "the",
-            "a",
-            "an",
-            "of",
-            "to",
-            "for",
-            "between",
-            "with",
-            "on",
-            "in",
-            "and",
-            "vs",
-            "versus",
-            "column",
-            "columns",
-            "can",
-            "you",
-        }
-        user_tokens = [
-            t for t in _tokenize(message) if len(t) > 1 and t not in skip_words
-        ]
-        for i, h in enumerate(headers):
-            hn = _normalize_text(h)
-            h_tokens = _tokenize(hn)
-            for tok in user_tokens:
-                if (
-                    tok in hn
-                    or hn in tok
-                    or any(
-                        ht.startswith(tok[:3]) or tok.startswith(ht[:3])
-                        for ht in h_tokens
-                        if len(ht) >= 3
-                    )
-                ):
-                    scores[i] += 1
-                    picked.add(i)
-                    break
-
-        ranked = sorted(list(picked), key=lambda i: scores[i], reverse=True)
-
-        # If user used a clear pair phrase but we cannot confidently map 2 columns, ask.
-        if len(terms) >= 2 and len(ranked) < 2:
-            suggestions = [headers[i] for i in ranked[:3]] if ranked else headers[:3]
-            suggestion_text = (
-                ", ".join([s for s in suggestions if s])
-                or "the column names in your table"
-            )
-            return {
-                "needs_clarification": True,
-                "reason": f'Could not confidently map both requested fields from "{terms[0]}" and "{terms[1]}"',
-                "clarification_question": f"I found close columns: {suggestion_text}. Which exact two columns should I use?",
-                "chart_type": chart_type,
-            }
-
-        x_col = None
-        y_col = None
-
-        if len(ranked) >= 2:
-            cand = ranked[:4]
-            numeric = [i for i in cand if _is_numeric_column(rows, i)]
-            categorical = [i for i in cand if i not in numeric]
-            x_col = categorical[0] if categorical else cand[0]
-            y_col = numeric[0] if numeric else (cand[1] if len(cand) > 1 else cand[0])
-            if x_col == y_col and len(cand) > 1:
-                y_col = cand[1]
-
-        confidence = 0.0
-        if x_col is not None and y_col is not None:
-            confidence = min(1.0, min(scores[x_col], scores[y_col]) / 5.0)
-
-        # Resolve multiple requested pairs when present.
-        chart_requests = []
-        if cleaned_pairs:
-            for left, right in cleaned_pairs:
-                left_idx = _resolve_best_header_index(headers, left, threshold=0.55)
-                right_idx = _resolve_best_header_index(headers, right, threshold=0.55)
-                if left_idx is None or right_idx is None or left_idx == right_idx:
-                    continue
-                left_num = _is_numeric_column(rows, left_idx)
-                right_num = _is_numeric_column(rows, right_idx)
-                if left_num and not right_num:
-                    cx, cy = right_idx, left_idx
-                elif right_num and not left_num:
-                    cx, cy = left_idx, right_idx
-                else:
-                    cx, cy = left_idx, right_idx
-                chart_requests.append(
-                    {
-                        "chart_type": chart_type,
-                        "x_col_index": cx,
-                        "y_col_index": cy,
-                        "x_header": headers[cx],
-                        "y_header": headers[cy],
-                        "source_terms": {"left": left, "right": right},
-                    }
-                )
-
-        if not chart_requests and x_col is not None and y_col is not None:
-            chart_requests.append(
-                {
-                    "chart_type": chart_type,
-                    "x_col_index": x_col,
-                    "y_col_index": y_col,
-                    "x_header": headers[x_col],
-                    "y_header": headers[y_col],
-                }
-            )
-
-        return {
-            "needs_clarification": len(chart_requests) == 0,
-            "chart_type": chart_type,
-            "x_col_index": x_col,
-            "y_col_index": y_col,
-            "x_header": headers[x_col] if x_col is not None else None,
-            "y_header": headers[y_col] if y_col is not None else None,
-            "confidence": confidence,
-            "chart_requests": chart_requests,
-            "clarification_question": (
-                "Please confirm the exact two columns to chart."
-                if len(chart_requests) == 0
-                else ""
-            ),
-            "ranked_candidates": [
-                {"index": i, "header": headers[i], "score": scores[i]}
-                for i in ranked[:6]
-            ],
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    return {
+        "analysis": output,
+        "statistics": stats,
+        "trends": trends.get("trends", {}),
+        "outliers": outliers.get("outliers", {}),
+        "distribution": distribution.get("distribution", {}),
+    }
 
 
 @app.post("/api/build-schema")
@@ -2372,191 +1731,104 @@ async def build_schema_endpoint(req: AnalyzeRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/api/verify-chart-execution")
-async def verify_chart_execution(req: VerifyChartExecutionRequest):
-    try:
-        expected = req.expected_charts or []
-        created = req.created_charts or []
-
-        if not expected:
-            return {
-                "ok": False,
-                "status": "needs_review",
-                "message": "No expected chart mapping was provided for verification.",
-            }
-
-        missing = []
-        matched = 0
-        for exp in expected:
-            exp_x = _normalize_text(exp.get("x_header"))
-            exp_y = _normalize_text(exp.get("y_header"))
-            found = False
-            for got in created:
-                got_x = _normalize_text(got.get("x_header"))
-                got_y = _normalize_text(got.get("y_header"))
-                if exp_x and exp_y and got_x == exp_x and got_y == exp_y:
-                    found = True
-                    break
-            if found:
-                matched += 1
-            else:
-                missing.append(
-                    {"x_header": exp.get("x_header"), "y_header": exp.get("y_header")}
-                )
-
-        ok = matched == len(expected)
-        if ok:
-            return {
-                "ok": True,
-                "status": "verified",
-                "message": f"Verified {matched}/{len(expected)} chart mappings.",
-                "missing": [],
-            }
-
-        return {
-            "ok": False,
-            "status": "mismatch",
-            "message": f"Only {matched}/{len(expected)} requested chart mappings were verified.",
-            "missing": missing,
-            "retry_suggestion": "Retry with explicit pairs (e.g., Category + Sales, Region + Sales).",
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
 class ReflectRequest(BaseModel):
     message: str
-    plan: list
-    results: list
+    plan: list = []
+    results: list = []
     provider: str = "openai"
     model: str = ""
     api_key: str
     selected_range: Optional[str] = None
 
 
-REFLECTION_PROMPT = """You are a self-correction agent. Your job is to analyze failed execution steps and create a recovery plan.
-
-Original user request: {message}
-
-Planned steps:
-{plan}
-
-Results:
-{results}
-
-DATA CONTEXT:
-Headers: {headers_context}
-Schema: {schema_context}
-
-Rules:
-1. Only create recovery steps for actions that FAILED (success: false)
-2. If table creation failed with "overlap", suggest a different approach (e.g., just write data without table, or use a different range)
-3. If set_values failed, suggest fixing the data dimensions
-4. If formula failed, check column headers above to ensure correct references
-5. Keep recovery steps minimal - only fix what's broken
-6. Use the column headers above to create accurate cell references in recovery steps
-7. Return ONLY valid JSON array of recovery steps
-
-Return format:
-[{{"action": "set_values", "params": {{"address": "A1", "values": [...], "sheet_name": "Sheet1"}}, "description": "Retry with corrected data"}}]
-
-If no recovery is possible, return: []"""
-
-
 @app.post("/api/reflect")
 async def reflect(req: ReflectRequest):
-    try:
-        from crewai import Agent, Task, Crew, Process
-
-        failed_results = [r for r in req.results if not r.get("success")]
-        if not failed_results:
-            return {"recovery": []}
-
-        model = setup_env(req.provider, req.model, req.api_key)
-
-        # Extract headers and schema from selected_range for context-aware reflection
-        headers_context = "No headers available"
-        schema_context = "No schema available"
-        if req.selected_range:
-            try:
-                sr = req.selected_range
-                if isinstance(sr, str):
-                    try:
-                        sr = json.loads(sr)
-                    except:
-                        sr = None
-                if sr and isinstance(sr, dict):
-                    values = sr.get("values", [])
-                    if values and len(values) > 0:
-                        headers = values[0] if values[0] else []
-                        header_names = [h for h in headers if h]
-                        if header_names:
-                            headers_context = f"Column headers: {', '.join(header_names)}"
-                        schema = build_table_schema(values)
-                        schema_context = json.dumps(schema, ensure_ascii=False)
-            except Exception:
-                pass
-
-        plan_str = "\n".join(
-            [
-                f"{i + 1}. {s.get('action', 'unknown')}: {s.get('description', '')}"
-                for i, s in enumerate(req.plan)
-            ]
-        )
-        results_str = "\n".join(
-            [
-                f"{i + 1}. {r.get('action', 'unknown')}: {'✓' if r.get('success') else '✗'} {r.get('output', '')}"
-                for i, r in enumerate(req.results)
-            ]
-        )
-
-        prompt = REFLECTION_PROMPT.format(
-            message=req.message,
-            plan=plan_str,
-            results=results_str,
-            headers_context=headers_context,
-            schema_context=schema_context,
-        )
-
-        reflector = Agent(
-            role="Self-Correction Agent",
-            goal="Analyze failed Excel operations and create minimal recovery plans",
-            backstory="You are a self-correction agent that analyzes failed steps and returns only valid JSON recovery plans.",
-            verbose=False,
-            allow_delegation=False,
-            llm=model,
-        )
-
-        reflect_task = Task(
-            description=prompt,
-            expected_output="A valid JSON array of recovery steps, or empty array [] if no recovery possible.",
-            agent=reflector,
-        )
-
-        crew = Crew(
-            agents=[reflector],
-            tasks=[reflect_task],
-            process=Process.sequential,
-            verbose=False,
-        )
-
-        result = crew.kickoff()
-        output = str(result.raw) if hasattr(result, "raw") else str(result)
-
-        # Try to extract JSON from response
-        json_match = re.search(r"\[.*\]", output, re.DOTALL)
-        if json_match:
-            recovery = json.loads(json_match.group())
-        else:
-            recovery = []
-
-        return {"recovery": recovery}
-
-    except Exception as e:
-        print(f"Reflection error: {e}")
+    """Build a minimal recovery plan for failed steps."""
+    failed_results = [r for r in req.results if not r.get("success")]
+    if not failed_results:
         return {"recovery": []}
+
+    headers_context = "No headers available"
+    schema_context = "No schema available"
+    sr = _selected_range_payload(req)
+    if sr:
+        values = sr.get("values") or []
+        if values and values[0]:
+            header_names = [str(h).strip() for h in values[0] if h]
+            if header_names:
+                headers_context = f"Column headers: {', '.join(header_names)}"
+            try:
+                schema_context = json.dumps(
+                    build_table_schema(values), ensure_ascii=False
+                )
+            except Exception:
+                logger.exception("failed to profile selected range for reflection")
+
+    plan_str = "\n".join(
+        f"{i + 1}. {st.get('action', 'unknown')}: {st.get('description', '')}"
+        for i, st in enumerate(req.plan)
+    )
+    results_str = "\n".join(
+        f"{i + 1}. {r.get('action', 'unknown')}: "
+        f"{'ok' if r.get('success') else 'FAILED'} {r.get('output', '')}"
+        for i, r in enumerate(req.results)
+    )
+
+    try:
+        output = await call_llm(
+            req.provider,
+            req.model,
+            req.api_key,
+            "You are a self-correction agent. You return ONLY a valid JSON array of "
+            "recovery steps. If no recovery is possible, return [].",
+            REFLECTION_PROMPT.format(
+                message=req.message,
+                plan=plan_str,
+                results=results_str,
+                headers_context=headers_context,
+                schema_context=schema_context,
+            ),
+            max_tokens=2048,
+        )
+    except RuntimeError as exc:
+        logger.warning("reflector LLM failed: %s", exc)
+        return {"recovery": []}
+
+    recovery = extract_json_array(output)
+    return {"recovery": recovery if isinstance(recovery, list) else []}
+
+
+def extract_json_array(raw: str) -> Optional[list]:
+    start = raw.find("[")
+    if start < 0:
+        return None
+    depth = 0
+    in_string = False
+    escaped = False
+    for i in range(start, len(raw)):
+        ch = raw[i]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_string = False
+            continue
+        if ch == '"':
+            in_string = True
+        elif ch == "[":
+            depth += 1
+        elif ch == "]":
+            depth -= 1
+            if depth == 0:
+                try:
+                    return json.loads(raw[start : i + 1])
+                except json.JSONDecodeError:
+                    return None
+    return None
 
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "crewai": "connected"}
+    return {"status": "ok"}

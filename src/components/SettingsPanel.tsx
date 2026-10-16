@@ -2,21 +2,12 @@ import React, { useState, useCallback, useEffect } from 'react';
 import { cn } from '@/lib/utils';
 import { loadMemory, saveMemory, getCheckpoints, clearCheckpoints, removeCheckpoint } from '@/lib/memory';
 import * as ExcelAPI from '@/lib/excel-api';
+import type { CelSettings } from '@/lib/types';
 
 type AIProvider = 'openai' | 'anthropic' | 'google' | 'openrouter';
 type SettingsTab = 'provider' | 'security' | 'memory' | 'conventions' | 'about';
 
-interface Settings {
-  provider: AIProvider;
-  model: string;
-  openaiKey: string;
-  anthropicKey: string;
-  googleKey: string;
-  openrouterKey: string;
-  openrouterEndpoint: string;
-  clearChatOnProviderChange: boolean;
-  storeKeysLocally: boolean;
-}
+interface Settings extends CelSettings {}
 
 interface SettingsPanelProps {
   settings: Settings;
@@ -440,10 +431,28 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({ settings, onSave, 
                       <div className="absolute right-0.5 top-0.5 w-3 h-3 rounded-full bg-white shadow-sm" />
                     </div>
                   </div>
+                  <button
+                    onClick={() => setLocal((prev) => ({ ...prev, storeKeysLocally: !prev.storeKeysLocally }))}
+                    className="w-full flex items-center justify-between p-2.5 rounded-lg bg-gray-50 border border-gray-100 hover:bg-gray-100 transition-colors text-left"
+                  >
+                    <div>
+                      <div className="text-xs font-medium text-gray-700">
+                        {local.storeKeysLocally ? 'Remember API keys on this device' : 'Forget API keys on close'}
+                      </div>
+                      <div className="text-[10px] text-gray-400">
+                        {local.storeKeysLocally
+                          ? 'Keys saved in localStorage'
+                          : 'Keys kept in sessionStorage and cleared when Excel closes'}
+                      </div>
+                    </div>
+                    <div className={`w-8 h-4 rounded-full relative flex-shrink-0 transition-colors ${local.storeKeysLocally ? 'bg-emerald-500' : 'bg-gray-300'}`}>
+                      <div className={`absolute top-0.5 w-3 h-3 rounded-full bg-white shadow-sm transition-all ${local.storeKeysLocally ? 'right-0.5' : 'left-0.5'}`} />
+                    </div>
+                  </button>
                   <div className="flex items-center justify-between p-2.5 rounded-lg bg-gray-50 border border-gray-100">
                     <div>
                       <div className="text-xs font-medium text-gray-700">No Cloud Sync</div>
-                      <div className="text-[10px] text-gray-400">Settings never leave your device</div>
+                      <div className="text-[10px] text-gray-400">Cel has no server-side account or sync</div>
                     </div>
                     <div className="w-8 h-4 rounded-full bg-emerald-500 relative">
                       <div className="absolute right-0.5 top-0.5 w-3 h-3 rounded-full bg-white shadow-sm" />

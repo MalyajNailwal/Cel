@@ -1,10 +1,8 @@
 fastapi
 uvicorn
-crewai
-crewai-tools
+httpx
 pydantic
 python-dotenv
-matplotlib
 numpy
 pandas
 scipy

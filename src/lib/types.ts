@@ -62,3 +62,15 @@ export interface CellFormat {
     right?: { color?: string; style?: string; weight?: string };
   };
 }
+
+export interface CelSettings {
+  provider: 'openai' | 'anthropic' | 'google' | 'openrouter';
+  model: string;
+  openaiKey: string;
+  anthropicKey: string;
+  googleKey: string;
+  openrouterKey: string;
+  openrouterEndpoint: string;
+  clearChatOnProviderChange: boolean;
+  storeKeysLocally: boolean;
+}

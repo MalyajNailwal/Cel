@@ -6,7 +6,7 @@ import { SettingsPanel } from '@/components/SettingsPanel';
 import { useConfirm, ConfirmModal } from '@/components/ConfirmModal';
 import type { ChatMessage, AIProvider } from '@/lib/ai-providers';
 import * as ExcelAPI from '@/lib/excel-api';
-import { loadMemory, saveMemory, addMistake, trackOperation, addCheckpoint, getCheckpoints, removeCheckpoint, getMemoryContext } from '@/lib/memory';
+import { addMistake, trackOperation, addCheckpoint, getCheckpoints, removeCheckpoint, getMemoryContext } from '@/lib/memory';
 
 type ProcessingPhase =
   | 'idle'
@@ -23,17 +23,7 @@ type ProcessingPhase =
   | 'verifying'
   | 'validating';
 
-interface Settings {
-  provider: AIProvider;
-  model: string;
-  openaiKey: string;
-  anthropicKey: string;
-  googleKey: string;
-  openrouterKey: string;
-  openrouterEndpoint: string;
-  clearChatOnProviderChange: boolean;
-  storeKeysLocally: boolean;
-}
+import type { CelSettings as Settings } from '@/lib/types';
 
 interface ExtendedMessage extends ChatMessage {
   id: string;
@@ -42,6 +32,46 @@ interface ExtendedMessage extends ChatMessage {
   chartImage?: string;
   chartImages?: string[];
   isReasoning?: boolean;
+}
+
+const SETTINGS_KEY = 'excel-ai-settings';
+const SESSION_SETTINGS_KEY = 'cel-session-settings';
+
+const DEFAULT_SETTINGS: Settings = {
+  provider: 'openai',
+  model: '',
+  openaiKey: '',
+  anthropicKey: '',
+  googleKey: '',
+  openrouterKey: '',
+  openrouterEndpoint: 'https://openrouter.ai/api/v1/chat/completions',
+  clearChatOnProviderChange: true,
+  storeKeysLocally: true,
+};
+
+function loadPersistedSettings(): Settings | null {
+  const local = localStorage.getItem(SETTINGS_KEY);
+  const session = sessionStorage.getItem(SESSION_SETTINGS_KEY);
+  const raw = local ?? session;
+  if (!raw) return null;
+  const parsed = JSON.parse(raw);
+  if (session && !local) {
+    // keys were session-only last time; make sure they are not written to disk
+    parsed.storeKeysLocally = false;
+  }
+  return { ...DEFAULT_SETTINGS, ...parsed };
+}
+
+/** Respect storeKeysLocally: false keeps keys out of localStorage entirely. */
+function persistSettings(next: Settings): void {
+  localStorage.removeItem(SESSION_SETTINGS_KEY);
+  if (!next.storeKeysLocally) {
+    const { openaiKey, anthropicKey, googleKey, openrouterKey, ...safe } = next;
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ ...safe, storeKeysLocally: false }));
+    sessionStorage.setItem(SESSION_SETTINGS_KEY, JSON.stringify(next));
+    return;
+  }
+  localStorage.setItem(SETTINGS_KEY, JSON.stringify(next));
 }
 
 interface SelectedRangeInfo {
@@ -79,10 +109,10 @@ export default function App() {
   const [executionProgress, setExecutionProgress] = useState<{ current: number; total: number; action: string } | null>(null);
   const [settings, setSettings] = useState<Settings>(() => {
     try {
-      const saved = localStorage.getItem('excel-ai-settings');
-      if (saved) return JSON.parse(saved);
+      const saved = loadPersistedSettings();
+      if (saved) return saved;
     } catch {}
-    return { provider: 'openai' as const, model: '', openaiKey: '', anthropicKey: '', googleKey: '' };
+    return { ...DEFAULT_SETTINGS };
   });
 
   // Custom confirm modal for Office.js compatibility
@@ -91,6 +121,7 @@ export default function App() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesRef = useRef<ExtendedMessage[]>([]);
   messagesRef.current = messages;
+  const abortRef = useRef<AbortController | null>(null);
 
   // Poll for selected range changes
   useEffect(() => {
@@ -169,6 +200,7 @@ export default function App() {
       setProcessingPhase('understanding');
 
       try {
+        abortRef.current?.abort();
         setProcessingPhase('context');
         const workbookContext = await getWorkbookContext();
         const selectedRangeData = await getSelectedRangeData();
@@ -185,7 +217,8 @@ export default function App() {
         let reasoning = '';
         let responseContent = '';
         
-        const response = await fetch('/api/chat', {
+        abortRef.current = new AbortController();
+        const response = await fetchWithTimeout('/api/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -285,23 +318,23 @@ export default function App() {
           }
         }
 
-        // Get final plan from the last message
-        const lastMsg = messages[messages.length - 1];
         plan = plan.length > 0 ? plan : [];
         
         const { validSteps, validationErrors } = validatePlan(plan, userMessage);
 
         // Parse selected range data for context awareness
         let selectedRange: { address: string; sheetName: string; rowCount: number; columnCount: number } | null = null;
+        let formulaCells: Set<string> = new Set();
         if (selectedRangeData) {
           try {
             const sr = JSON.parse(selectedRangeData);
-            console.log('[DEBUG] selectedRangeData parsed:', sr);
             if (sr.address && sr.sheetName) {
               selectedRange = { address: sr.address, sheetName: sr.sheetName, rowCount: sr.rowCount || 1, columnCount: sr.columnCount || 1 };
-              console.log('[DEBUG] selectedRange set:', selectedRange);
             }
-          } catch (e) { console.log('[DEBUG] selectedRangeData parse error:', e); }
+            (sr.formulaCells || []).forEach((f: any) => {
+              if (f?.address) formulaCells.add(String(f.address).toUpperCase());
+            });
+          } catch {}
         }
 
         // If user has a selection AND is modifying data (not creating new sheet), use the selection
@@ -309,8 +342,6 @@ export default function App() {
         const createsNewSheet = /new sheet|another sheet|make sheet|create sheet/i.test(userMessage);
         const modifiesExisting = /add|write|put|fill|update|change|modify|calculate|compute|less|more|subtract|increase|decrease/i.test(userMessage);
         const userWantsSelected = hasSelection && !createsNewSheet && (modifiesExisting || /selected|here|this range|these cells|border/i.test(userMessage));
-        console.log('[DEBUG] userWantsSelected:', userWantsSelected, '| hasSelection:', hasSelection, '| createsNewSheet:', createsNewSheet);
-        console.log('[DEBUG] userWantsSelected regex test for:', userMessage, '→ result:', userWantsSelected);
 
         // Check if user wants data generation
         const dataGenMatch = userMessage.match(/create\s+(a\s+)?table.*?(?:with|for)\s+(\d+)\s+(people|records|employees|sales|students|rows)/i);
@@ -329,7 +360,7 @@ export default function App() {
           else if (bloodReportMatch) dataType = 'blood_report';
 
           setProcessingPhase('analyzing');
-          const genResponse = await fetch('/api/generate-data', {
+          const genResponse = await fetchWithTimeout('/api/generate-data', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ data_type: dataType, count: Math.min(count, 10000) }),
@@ -340,8 +371,7 @@ export default function App() {
             const values = genResult.data;
             const rows = values.length;
             const cols = values[0]?.length || 1;
-            const colLetter = cols <= 26 ? String.fromCharCode(64 + cols) : String.fromCharCode(64 + Math.floor((cols - 1) / 26)) + String.fromCharCode(64 + ((cols - 1) % 26) + 1);
-            const address = `A1:${colLetter}${rows}`;
+            const address = `A1:${columnLetter(cols)}${rows}`;
 
             try {
               let targetSheet = 'Sheet1';
@@ -377,12 +407,11 @@ export default function App() {
           }
         }
 
-        // Check if user wants data analysis (charts now go through /api/chat agent pipeline)
+        // Check if user wants data analysis (charts go through /api/chat)
         const analysisKeywords = /analyze|analysis|statistics|stats|trends|insights|outliers|distribution|compare/i;
         const isAnalysisRequest = analysisKeywords.test(userMessage);
 
         if (isAnalysisRequest && selectedRangeData) {
-          setProcessingPhase('context');
           let selectedData = null;
           try {
             const sr = JSON.parse(selectedRangeData);
@@ -392,55 +421,36 @@ export default function App() {
           } catch {}
 
           if (selectedData) {
-            setProcessingPhase('schema');
-            try {
-              await fetch('/api/build-schema', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  data: selectedData,
-                  question: userMessage,
-                  provider: settings.provider,
-                  model: effectiveModel,
-                  api_key: apiKey,
-                  headers: selectedData[0] || [],
-                }),
-              });
-            } catch {}
+            setProcessingPhase('analyzing');
+            // Stats are computed server-side; only the summary is sent to the LLM.
+            const isLargeData = selectedData.length > 1000;
+            const endpoint = isLargeData ? '/api/analyze-large' : '/api/analyze';
+            const analyzeResponse = await fetch(endpoint, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                data: selectedData,
+                question: userMessage,
+                provider: settings.provider,
+                model: effectiveModel,
+                api_key: apiKey,
+                headers: selectedData[0] || [],
+              }),
+            });
 
             let analysisResult: any = { analysis: '' };
-            if (isAnalysisRequest) {
-              setProcessingPhase('analyzing');
-              const isLargeData = selectedData.length > 1000;
-              const endpoint = isLargeData ? '/api/analyze-large' : '/api/analyze';
-              const analyzeResponse = await fetch(endpoint, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  data: selectedData,
-                  question: userMessage,
-                  provider: settings.provider,
-                  model: effectiveModel,
-                  api_key: apiKey,
-                  headers: selectedData[0] || [],
-                }),
-              });
-              if (analyzeResponse.ok) {
-                analysisResult = await analyzeResponse.json();
-              }
+            if (analyzeResponse.ok) {
+              analysisResult = await analyzeResponse.json();
             }
 
-              if (isAnalysisRequest) {
-              const aiMsg: ExtendedMessage = {
-                id: `msg-${Date.now()}`,
-                role: 'assistant',
-                content: analysisResult.analysis || 'Analysis complete.',
-              };
-              setMessages((prev) => [...prev, aiMsg]);
-              setIsProcessing(false);
-              setProcessingPhase('idle');
-              return;
-            }
+            setMessages((prev) => [...prev, {
+              id: `msg-${Date.now()}`,
+              role: 'assistant',
+              content: analysisResult.analysis || 'Analysis complete.',
+            }]);
+            setIsProcessing(false);
+            setProcessingPhase('idle');
+            return;
           }
         }
 
@@ -616,7 +626,6 @@ export default function App() {
         
         // Operation Timeout: Max 2 minutes for execution
         const OPERATION_TIMEOUT_MS = 120000;
-        const STEP_TIMEOUT_MS = 30000;
         const executionStartTime = Date.now();
         
         // Check for timeout before each step
@@ -634,10 +643,6 @@ export default function App() {
           } catch {}
         }
 
-        // Add diagnostic info to execution results
-        const executionSummary = `[DEBUG] Selected range detected: ${selectedRange?.address || 'NONE'} in sheet ${selectedRange?.sheetName || 'NONE'}. User wants selected: ${userWantsSelected}`;
-        console.log(executionSummary);
-        
         for (let i = 0; i < validSteps.length; i++) {
           // Operation Timeout: Check before each step
           checkTimeout();
@@ -648,8 +653,7 @@ export default function App() {
           // Update live step progress
           setExecutionProgress({ current: i + 1, total: validSteps.length, action: step.action });
 
-          // CRITICAL: Force selected range for write operations when user refers to selection
-          console.log('[EXECUTION] Final check - userWantsSelected:', userWantsSelected, '| react selectedRange state:', selectedRange, '| step.action:', step.action, '| original params:', { address: params.address, sheet_name: params.sheet_name });
+          // Force selected range for write operations when user refers to selection
           if (userWantsSelected && selectedRange) {
             const writeActions = ['set_values', 'apply_format', 'create_table', 'sort_range', 'auto_fill'];
 
@@ -660,11 +664,14 @@ export default function App() {
             const plannerSheet = params.sheet_name || '';
             const selectedAddr = selectedRange.address;
             const selectedSheet = selectedRange.sheetName;
-            const alreadyOnTarget = plannerAddress.includes(selectedAddr) || selectedAddr.includes(plannerAddress.replace(/!/g, ''));
+            const normalizeAddr = (a: string) => a.replace(/!/g, '').replace(/\$/g, '').toUpperCase();
+            const normPlanner = normalizeAddr(plannerAddress);
+            const normSelected = normalizeAddr(selectedAddr);
+            const alreadyOnTarget =
+              !!normPlanner && (normPlanner === normSelected || normSelected.startsWith(normPlanner + ':'));
             const isCrossSheet = plannerSheet && plannerSheet !== selectedSheet && plannerSheet !== '';
 
             if (writeActions.includes(step.action) && !alreadyOnTarget && !isCrossSheet) {
-              console.log('[EXECUTION] Overwriting params with selected range:', selectedAddr, selectedSheet);
               params.address = selectedAddr;
               params.sheet_name = selectedSheet;
               validationErrors.push(`Step ${i + 1}: Using selected range "${selectedAddr}" in "${selectedSheet}"`);
@@ -723,26 +730,38 @@ export default function App() {
 
           const A1_REGEX = /^[A-Z]{1,3}\d+(:[A-Z]{1,3}\d+)?$/;
           const addressFields = ['address', 'source_address', 'target_address', 'data_range'];
+          let invalidAddressStep = false;
           for (const field of addressFields) {
             if (params[field] && typeof params[field] === 'string') {
               const clean = params[field].includes('!') ? params[field].split('!')[1] : params[field];
               if (!A1_REGEX.test(clean)) {
-                const fallback = field === 'data_range' ? 'A1:B10' : field.includes('source') ? 'A1' : field.includes('target') ? 'A1:A10' : 'A1';
-                validationErrors.push(`Step ${i + 1}: Invalid range "${params[field]}" for ${field} — using "${fallback}"`);
-                params[field] = fallback;
+                // Guessing an address writes to the wrong cells. Skip and report.
+                executionResults.push({
+                  action: step.action,
+                  success: false,
+                  output: `Skipped: invalid ${field} "${params[field]}"`,
+                });
+                invalidAddressStep = true;
+                break;
               }
             }
           }
 
           if (step.action === 'create_chart') {
-            const validTypes = ['column', 'bar', 'line', 'pie', 'pie3D', 'doughnut', 'area', 'scatter', 'radar', 'surface', 'bubble'];
+            const validTypes = ['column', 'bar', 'line', 'pie', 'pie3D', 'doughnut', 'area', 'scatter', 'radar', 'surface', 'bubble',
+              'columnClustered', 'columnStacked', 'columnStacked100', 'barClustered', 'barStacked', 'barStacked100',
+              'lineStacked', 'lineMarkers', 'lineMarkersStacked', 'areaStacked', 'areaStacked100',
+              'xyscatter', 'xyscatterSmooth', 'xyscatterSmoothNoMarkers', 'xyscatterLines', 'xyscatterLinesNoMarkers',
+              'radarFilled', 'radarMarkers', 'surface3D', 'surfaceWireframe', 'surface3DWireframe',
+              'bubble3DEffect', 'stockHLC', 'stockOHLC', 'stockVHLC', 'stockVOHLC',
+              'treemap', 'sunburst', 'histogram', 'boxwhisker', 'waterfall', 'funnel'];
             if (!params.chart_type || !validTypes.includes(params.chart_type)) {
               params.chart_type = 'column';
               validationErrors.push(`Step ${i + 1}: Invalid chart_type — defaulting to "column"`);
             }
             if (!params.data_range) {
-              params.data_range = 'A1:B10';
-              validationErrors.push(`Step ${i + 1}: Missing data_range — using "A1:B10"`);
+              executionResults.push({ action: step.action, success: false, output: 'Skipped: missing data_range' });
+              continue;
             }
             if (!params.sheet_name && lastCreatedSheet) {
               params.sheet_name = lastCreatedSheet;
@@ -771,20 +790,17 @@ export default function App() {
               validationErrors.push(`Step ${i + 1}: Dataset too large — clamped to 5000 rows`);
             }
             
-            // ONLY auto-calculate address if user did NOT want selected range
-            // If userWantsSelected is true, preserve the selected range address
-            if (!userWantsSelected || !selectedRange) {
+            // Only auto-calculate the address when the planner did not choose one.
+            // The planner may deliberately target F12 (a total row), not A1.
+            if (!params.address) {
               const rows = params.values.length;
               const cols = params.values[0]?.length || 1;
-              const colLetter = cols <= 26 ? String.fromCharCode(64 + cols) : String.fromCharCode(64 + Math.floor((cols - 1) / 26)) + String.fromCharCode(64 + ((cols - 1) % 26) + 1);
-              const correctAddress = `A1:${colLetter}${rows}`;
-              
-              if (params.address && params.address !== correctAddress) {
-                validationErrors.push(`Step ${i + 1}: Address "${params.address}" doesn't match data size — corrected to "${correctAddress}"`);
-              }
-              params.address = correctAddress;
-            } else {
-              // User wants selected range - validate/adjust data to match range size
+              params.address = `A1:${columnLetter(cols)}${rows}`;
+              validationErrors.push(`Step ${i + 1}: No address from planner — derived "${params.address}"`);
+            }
+
+            // User wants selected range - validate/adjust data to match range size
+            if (userWantsSelected && selectedRange) {
               const selectedRows = selectedRange.rowCount;
               const selectedCols = selectedRange.columnCount;
               const dataRows = params.values.length;
@@ -1087,6 +1103,31 @@ export default function App() {
             }
           }
 
+          // Writing a literal over an existing formula destroys the calculation.
+          if (step.action === 'set_values' && params.values && formulaCells.size > 0 && params.address) {
+            const base = params.address.split('!').pop()!.replace(/\$/g, '');
+            const m = base.match(/^([A-Z]+)(\d+)/);
+            if (m) {
+              const startCol = colToIndex(m[1]);
+              const startRow = parseInt(m[2], 10);
+              const clashes: string[] = [];
+              for (let r = 0; r < params.values.length; r++) {
+                for (let c = 0; c < (params.values[r]?.length || 0); c++) {
+                  const addr = `${indexToCol(startCol + c)}${startRow + r}`;
+                  if (formulaCells.has(addr)) clashes.push(addr);
+                }
+              }
+              if (clashes.length > 0) {
+                executionResults.push({
+                  action: step.action,
+                  success: false,
+                  output: `Skipped: would overwrite formula(s) at ${clashes.slice(0, 5).join(', ')}${clashes.length > 5 ? ` and ${clashes.length - 5} more` : ''}. Use set_formulas to change them.`,
+                });
+                continue;
+              }
+            }
+          }
+
           if (step.action === 'set_values' && params.values) {
             const sanitizeValue = (v: any): any => {
               if (typeof v === 'number' && (Number.isNaN(v) || !Number.isFinite(v))) return 0;
@@ -1111,6 +1152,10 @@ export default function App() {
             );
           }
 
+          if (invalidAddressStep) {
+            continue;
+          }
+
           if (validSteps.length === 0) {
             executionResults.push({ action: 'plan', success: false, output: 'No valid steps in plan — AI returned empty or invalid plan' });
           }
@@ -1129,7 +1174,7 @@ export default function App() {
               const freshContext = await getWorkbookContext();
               if (freshContext) {
                 const ctx = JSON.parse(freshContext);
-                const newSheet = ctx.sheets.find((s: string) => s.includes(lastCreatedSheet!.substring(0, 10)));
+                const newSheet = ctx.sheets.find((s: string) => s === lastCreatedSheet);
                 if (newSheet) {
                   params.sheet_name = newSheet;
                   validationErrors.push(`Step ${i + 1}: Using verified sheet "${newSheet}"`);
@@ -1286,7 +1331,7 @@ export default function App() {
                 if (apiKey) {
                   try {
                     setProcessingPhase('validating');
-                    const adaptiveReflect = await fetch('/api/reflect', {
+                    const adaptiveReflect = await fetchWithTimeout('/api/reflect', {
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json' },
                       body: JSON.stringify({
@@ -1326,15 +1371,13 @@ export default function App() {
         const failedSteps = executionResults.filter((r) => !r.success);
         if (failedSteps.length > 0) {
           setProcessingPhase('validating');
-          console.log('[REFLECTION] Reflection triggered -', failedSteps.length, 'step(s) failed, attempting recovery...');
           
           // Check if API key is available
           if (!apiKey) {
-            console.log('[REFLECTION] No API key - skipping reflection');
             validationErrors.push('Reflection skipped: No API key configured');
           } else {
             try {
-              const reflectionResponse = await fetch('/api/reflect', {
+              const reflectionResponse = await fetchWithTimeout('/api/reflect', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -1353,7 +1396,6 @@ export default function App() {
                 const recoverySteps = reflectionData.recovery || [];
                 
                 if (recoverySteps.length > 0) {
-                  console.log('[REFLECTION] Recovery plan received -', recoverySteps.length, 'step(s)');
                   validationErrors.push(`Reflection: Attempting ${recoverySteps.length} recovery step(s)...`);
                   
                   let recoveryFailures = 0;
@@ -1389,16 +1431,14 @@ export default function App() {
                   }
                 }
               } else {
-                console.log('[REFLECTION] Reflection API returned error:', reflectionResponse.status);
               }
             } catch (e) {
-              console.log('[REFLECTION] Reflection failed:', e);
             }
           }
         }
         
         setProcessingPhase('validating');
-        const validationResponse = await fetch('/api/execute', {
+        const validationResponse = await fetchWithTimeout('/api/execute', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -1425,12 +1465,18 @@ export default function App() {
           executionResults,
         }]);
       } catch (error) {
-        setMessages((prev) => [...prev, {
-          id: `err-${Date.now()}`,
-          role: 'assistant',
-          content: `Error: ${error instanceof Error ? error.message : 'An unexpected error occurred'}. Make sure the backend is running.`,
-        }]);
+        const aborted =
+          error instanceof DOMException &&
+          (error.name === 'AbortError' || error.name === 'TimeoutError');
+        if (!aborted) {
+          setMessages((prev) => [...prev, {
+            id: `err-${Date.now()}`,
+            role: 'assistant',
+            content: `Error: ${error instanceof Error ? error.message : 'An unexpected error occurred'}. Make sure the backend is running.`,
+          }]);
+        }
       } finally {
+        abortRef.current = null;
         setIsProcessing(false);
         setProcessingPhase('idle');
         setExecutionProgress(null);
@@ -1452,9 +1498,13 @@ export default function App() {
   }, []);
 
   const handleSettingsSave = useCallback((newSettings: Settings) => {
+    const providerChanged = newSettings.provider !== settings.provider;
     setSettings(newSettings);
-    localStorage.setItem('excel-ai-settings', JSON.stringify(newSettings));
-  }, []);
+    persistSettings(newSettings);
+    if (providerChanged && newSettings.clearChatOnProviderChange) {
+      setMessages([]);
+    }
+  }, [settings.provider]);
 
   const hasKey = getApiKey().length > 0;
   const phase = processingPhase ? PHASE_CONFIG[processingPhase] : PHASE_CONFIG.idle;
@@ -1628,14 +1678,12 @@ async function executeStep(step: { action: string; params: Record<string, any>; 
     case 'get_range': return JSON.stringify(await ExcelAPI.getRange(params.address, params.sheet_name));
     case 'get_sheet_data': return JSON.stringify(await ExcelAPI.getSheetData(params.sheet_name, params.max_rows));
     case 'set_values': 
-      console.log('[EXECUTION] set_values called with:', { address: params.address, sheet_name: params.sheet_name, valuesRows: params.values?.length });
       await ExcelAPI.setValues(params.address, params.values, params.sheet_name); 
       return `Values written to ${params.address} in ${params.sheet_name}`;
     case 'create_table': await ExcelAPI.createTable(params.address, params.name, params.sheet_name); return `Created table "${params.name}" at ${params.address}`;
     case 'set_formulas': await ExcelAPI.setFormulas(params.address, params.formulas, params.sheet_name); return `Formulas written to ${params.address}`;
     case 'apply_format': {
       const format = { address: params.address, sheetName: params.sheet_name, bold: params.bold, italic: params.italic, fontColor: params.font_color, fillColor: params.fill_color, fontSize: params.font_size, fontFamily: params.font_family, numberFormat: params.number_format, horizontalAlignment: params.horizontal_alignment, verticalAlignment: params.vertical_alignment, wrapText: params.wrap_text, borders: params.border_all ? { all: true, color: params.border_color || '#000000', style: params.border_style || 'Continuous', weight: params.border_weight || 'Thin' } : undefined };
-      console.log('[EXECUTION] apply_format borders:', JSON.stringify(format.borders));
       await ExcelAPI.applyFormat(format);
       return `Formatting applied to ${params.address}`;
     }
@@ -1649,13 +1697,37 @@ async function executeStep(step: { action: string; params: Record<string, any>; 
     case 'delete_worksheet': await ExcelAPI.deleteWorksheet(params.sheet_name || params.name); return `Deleted worksheet "${params.sheet_name || params.name}"`;
     case 'sort_range': await ExcelAPI.sortRange(params.address, params.column_index, params.ascending, params.sheet_name); return `Sorted ${params.address} by column ${params.column_index}`;
     case 'auto_fill': await ExcelAPI.autoFill(params.source_address, params.target_address, params.sheet_name); return `Autofilled from ${params.source_address} to ${params.target_address}`;
-    case 'create_chart': return await ExcelAPI.createChart(params.chart_type, params.data_range, params.sheet_name, params.title, params.position);
+    case 'create_chart': return await ExcelAPI.createChart(params.chart_type, params.data_range, params.sheet_name, params.title, params.position, {
+      showLegend: params.show_legend, legendPosition: params.legend_position,
+      showDataLabels: params.show_data_labels, xAxisTitle: params.x_axis_title,
+      yAxisTitle: params.y_axis_title, gapWidth: params.gap_width,
+      overlap: params.overlap, seriesColor: params.series_color,
+    });
+    case 'copy_range': await ExcelAPI.copyRange(params.source_address, params.target_address, params.source_sheet, params.target_sheet || params.sheet_name); return `Copied ${params.source_address} to ${params.target_address}`;
+    case 'auto_fit_columns': await ExcelAPI.autoFitColumns(params.address, params.sheet_name); return `Auto-fitted columns in ${params.address || 'used range'}`;
+    case 'set_row_height': await ExcelAPI.setRowHeight(params.address, params.points, params.sheet_name); return `Set row height ${params.points}pt for ${params.address}`;
+    case 'set_column_width': await ExcelAPI.setColumnWidth(params.address, params.points, params.sheet_name); return `Set column width ${params.points}pt for ${params.address}`;
+    case 'freeze_panes': await ExcelAPI.freezePanes(params.rows || 1, params.columns || 0, params.sheet_name); return `Froze ${params.rows || 1} row(s) and ${params.columns || 0} column(s)`;
+    case 'add_comment': await ExcelAPI.addComment(params.address, params.text, params.sheet_name, params.author); return `Added comment to ${params.address}`;
+    case 'add_hyperlink': await ExcelAPI.addHyperlink(params.address, params.url, params.text, params.sheet_name); return `Added hyperlink to ${params.url} at ${params.address}`;
+    case 'text_to_columns': await ExcelAPI.textToColumns(params.address, params.delimiter || ',', params.sheet_name); return `Split ${params.address} on "${params.delimiter || ','}"`;
+    case 'remove_duplicates': {
+      const removed = await ExcelAPI.removeDuplicates(params.address, params.sheet_name);
+      return `Removed ${removed} duplicate row(s) from ${params.address}`;
+    }
+    case 'create_pivot_table': return await ExcelAPI.createPivotTable(
+      params.source_address, params.target_address,
+      Array.isArray(params.rows) ? params.rows : [params.rows],
+      Array.isArray(params.values) ? params.values : [params.values],
+      params.columns ? (Array.isArray(params.columns) ? params.columns : [params.columns]) : undefined,
+      params.sheet_name);
     case 'conditional_format':
       await ExcelAPI.conditionalFormat(params.address, {
         type: params.rule_type || 'cellValue',
         operator: params.operator,
         formula1: params.formula1,
         formula2: params.formula2,
+        colors: params.colors,
         format: { fillColor: params.fill_color, fontColor: params.font_color, bold: params.bold },
       }, params.sheet_name);
       return `Conditional formatting applied to ${params.address}`;
@@ -1692,7 +1764,7 @@ async function getSelectedRangeData(): Promise<string | null> {
       if (typeof Excel === 'undefined') { resolve(null); return; }
       Excel.run(async (context) => {
         const range = context.workbook.getSelectedRange();
-        range.load('address, rowCount, columnCount, values');
+        range.load('address, rowCount, columnCount, values, formulas');
         await context.sync();
         const sheet = range.worksheet;
         sheet.load('name');
@@ -1708,8 +1780,42 @@ async function getSelectedRangeData(): Promise<string | null> {
           }
         }
         
-        const result = JSON.stringify({ address: range.address, sheetName: sheet.name, rowCount: range.rowCount, columnCount: range.columnCount, values: range.values, headers: headers });
-        console.log('[RANGE] getSelectedRangeData returning:', result.slice(0, 200));
+        const formulas = range.formulas as string[][];
+        // Only cells that actually hold a formula, so the planner sees real
+        // calculations instead of re-writing them as literal values.
+        const formulaCells: { address: string; formula: string }[] = [];
+        const colName = (n: number): string => {
+          let out = '';
+          let v = n;
+          while (v > 0) { const rem = (v - 1) % 26; out = String.fromCharCode(65 + rem) + out; v = Math.floor((v - 1) / 26); }
+          return out;
+        };
+        for (let r = 0; r < (formulas?.length || 0); r++) {
+          for (let c = 0; c < (formulas[r]?.length || 0); c++) {
+            const f = formulas[r][c];
+            if (typeof f === 'string' && f.startsWith('=')) {
+              formulaCells.push({ address: `${colName(c)}${r + 1}`, formula: f });
+            }
+          }
+        }
+        range.load('numberFormat');
+        await context.sync();
+        const distinctFormats = Array.from(
+          new Set(
+            ((range.numberFormat as string[][]) || [])
+              .flat()
+              .filter((f) => f && f !== 'General')
+          )
+        );
+
+        const result = JSON.stringify({
+          address: range.address, sheetName: sheet.name,
+          rowCount: range.rowCount, columnCount: range.columnCount,
+          values: range.values, headers: headers,
+          formulas: formulas,
+          formulaCells: formulaCells.slice(0, 60),
+          numberFormats: distinctFormats.slice(0, 12),
+        });
         resolve(result);
       }).catch(() => resolve(null));
     });
@@ -1851,10 +1957,53 @@ async function prescanReferencedSheets(userMessage: string, metadata: string | n
   }
 }
 
+const AGENT_TIMEOUT_MS = 120000;
+
+/** fetch with a hard timeout, so one hung LLM call cannot freeze the task pane. */
+async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs = AGENT_TIMEOUT_MS): Promise<Response> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(new DOMException('Timeout', 'TimeoutError')), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: ctrl.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function colToIndex(letters: string): number {
+  let n = 0;
+  for (const ch of letters.toUpperCase()) n = n * 26 + (ch.charCodeAt(0) - 64);
+  return n - 1;
+}
+
+function indexToCol(index: number): string {
+  let n = index + 1;
+  let out = '';
+  while (n > 0) {
+    const rem = (n - 1) % 26;
+    out = String.fromCharCode(65 + rem) + out;
+    n = Math.floor((n - 1) / 26);
+  }
+  return out;
+}
+
+function columnLetter(cols: number): string {
+  let n = cols;
+  let out = '';
+  while (n > 0) {
+    const rem = (n - 1) % 26;
+    out = String.fromCharCode(65 + rem) + out;
+    n = Math.floor((n - 1) / 26);
+  }
+  return out || 'A';
+}
+
 function validatePlan(plan: { action: string; params: Record<string, any>; description: string }[], userMessage: string = ''): { validSteps: { action: string; params: Record<string, any>; description: string }[]; validationErrors: string[] } {
   const validSteps: { action: string; params: Record<string, any>; description: string }[] = [];
   const validationErrors: string[] = [];
-  const VALID_ACTIONS = new Set(['get_workbook_structure', 'get_selected_range', 'get_range', 'get_sheet_data', 'set_values', 'set_formulas', 'apply_format', 'insert_rows', 'delete_rows', 'insert_columns', 'delete_columns', 'add_worksheet', 'delete_worksheet', 'create_table', 'sort_range', 'auto_fill', 'create_chart', 'conditional_format', 'find_replace', 'merge_cells', 'unmerge_cells', 'add_dropdown']);
+  const VALID_ACTIONS = new Set(['get_workbook_structure', 'get_selected_range', 'get_range', 'get_sheet_data', 'set_values', 'set_formulas', 'apply_format', 'insert_rows', 'delete_rows', 'insert_columns', 'delete_columns', 'add_worksheet', 'delete_worksheet', 'create_table', 'sort_range', 'auto_fill', 'create_chart', 'conditional_format', 'find_replace', 'merge_cells', 'unmerge_cells', 'add_dropdown', 'copy_range', 'auto_fit_columns',
+    'set_row_height', 'set_column_width', 'freeze_panes', 'add_comment', 'add_hyperlink',
+    'text_to_columns', 'remove_duplicates', 'create_pivot_table']);
   for (let i = 0; i < plan.length; i++) {
     const step = plan[i];
     if (!VALID_ACTIONS.has(step.action)) { validationErrors.push(`Step ${i + 1}: Unknown action "${step.action}" — skipping`); continue; }
