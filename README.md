@@ -59,6 +59,21 @@ Every request goes through the same pipeline. Charts, formulas, formatting, data
 
 ---
 
+## Tests
+
+```bash
+cd backend && python3 test_pipeline.py    # 31 tests, mock provider, no API key
+cd backend && python3 test_prompts.py     #  9 tests, prompt/context wiring
+./src/lib/__tests__/run-tests.sh         # 39 checks, every excel-api action
+node src/lib/__tests__/address-math.test.mjs
+```
+
+The excel-api suite runs against a fake Office.js host (`src/lib/__tests__/fake-office.mjs`)
+that models worksheets, ranges, addressing, and staged writes, so every action is
+exercised without Excel installed.
+
+---
+
 ## Why Cel
 
 | Capability | Cel | Microsoft Copilot | Pi for Excel |

@@ -350,6 +350,8 @@ IMPORTANT - CONDITIONAL FORMATTING:
 - Example: "highlight cells > 100 in yellow" → conditional_format with address, operator="GreaterThan", formula1="100", fill_color="#FFFF00"
 - Example: "red if negative" → conditional_format with operator="LessThan", formula1="0", fill_color="#FF0000"
 - Example: "green if between 50 and 100" → conditional_format with operator="Between", formula1="50", formula2="100", fill_color="#00FF00"
+- Other rule_type values: "colorScale" (3-colour heat map, optional colors array), "dataBar" (in-cell bars),
+  "duplicateValues", "uniqueValues", "blanks", "aboveAverage", "topBottom" (formula1=rank, operator="top"/"bottom"/"percent"/"bottomPercent")
 
 IMPORTANT - FIND AND REPLACE:
 - When user says "replace X with Y", "change all 'old' to 'new'", "find and replace" → use find_replace

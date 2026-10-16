@@ -280,6 +280,53 @@ class PlannerContextTest(unittest.TestCase):
         self.assertEqual(ctx["schema_context"], "")
 
 
+class PlannerPromptTest(unittest.TestCase):
+    def render(self, message="sum sales by region", **kw):
+        captured = {}
+
+        async def fake(*args, **kwargs):
+            captured["user"] = args[4]
+            return json.dumps({"reasoning": "", "plan": [], "response": ""})
+
+        original = main.call_llm
+        main.call_llm = fake
+        try:
+            asyncio.run(
+                main.chat(
+                    main.ChatRequest(
+                        message=message, provider="p", model="m", api_key="k",
+                        selected_range=SELECTED, **kw,
+                    )
+                )
+            )
+        finally:
+            main.call_llm = original
+        return captured["user"]
+
+    def test_no_unfilled_placeholders_remain(self):
+        import re
+
+        user = self.render()
+        self.assertEqual(re.findall(r"\{(\w+)\}", user), [])
+
+    def test_new_capabilities_are_documented_to_planner(self):
+        user = self.render()
+        for expected in (
+            "PIVOT TABLES / SUMMARIES",
+            "create_pivot_table",
+            "copy_range",
+            "freeze_panes",
+            "colorScale",
+            "dataBar",
+            "columnStacked100",
+            "EXISTING FORMULAS IN THE SELECTION",
+            "NUMBER FORMATS ALREADY IN USE",
+            "NUMERIC COLUMNS",
+            "CLARIFICATION - check BEFORE planning",
+        ):
+            self.assertIn(expected, user, f"planner prompt missing: {expected}")
+
+
 class FormulaContextTest(unittest.TestCase):
     def test_formula_cells_are_listed(self):
         sr = {

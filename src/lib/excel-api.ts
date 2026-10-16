@@ -302,46 +302,70 @@ export async function applyFormat(format: CellFormat): Promise<void> {
   });
 }
 
+/** Insert `count` blank rows directly above the row containing `address`. */
 export async function insertRows(address: string, count: number, sheetName?: string): Promise<void> {
   await Excel.run(async (context) => {
     const sheet = sheetName
       ? context.workbook.worksheets.getItem(sheetName)
       : context.workbook.worksheets.getActiveWorksheet();
     const range = sheet.getRange(address);
-    range.getRowsAbove().insert('Down');
+    range.load('rowCount, columnCount');
+    await context.sync();
+
+    // A1 spans every row, so inserting above it would be a no-op.
+    // Insert into the first populated row instead.
+    const anchorRow = range.rowCount > 1 ? range.getRow(0) : range;
+    for (let i = 0; i < Math.max(1, count); i++) anchorRow.insert('Down');
     await context.sync();
   });
 }
 
+/** Delete `count` rows starting at the row containing `address`. */
 export async function deleteRows(address: string, count: number, sheetName?: string): Promise<void> {
   await Excel.run(async (context) => {
     const sheet = sheetName
       ? context.workbook.worksheets.getItem(sheetName)
       : context.workbook.worksheets.getActiveWorksheet();
     const range = sheet.getRange(address);
-    range.getRowsBelow().delete('Up');
+    range.load('rowCount, columnCount');
+    await context.sync();
+
+    const anchorRow = range.rowCount > 1 ? range.getRow(0) : range;
+    for (let i = 0; i < Math.max(1, count); i++) anchorRow.delete('Up');
     await context.sync();
   });
 }
 
+/** Insert `count` blank columns directly left of the column containing `address`. */
 export async function insertColumns(address: string, count: number, sheetName?: string): Promise<void> {
   await Excel.run(async (context) => {
     const sheet = sheetName
       ? context.workbook.worksheets.getItem(sheetName)
       : context.workbook.worksheets.getActiveWorksheet();
     const range = sheet.getRange(address);
-    range.getColumnsBefore().insert('Right');
+    range.load('rowCount, columnCount');
+    await context.sync();
+
+    const anchorCol = range.columnCount > 1 ? range.getColumn(0) : range;
+    // insert() shifts Right or Down; right-shift on the anchor column opens a
+    // gap immediately to its left, which is what "insert before" means.
+    for (let i = 0; i < Math.max(1, count); i++) anchorCol.insert('Right');
     await context.sync();
   });
 }
 
+/** Delete `count` columns starting at the column containing `address`. */
 export async function deleteColumns(address: string, count: number, sheetName?: string): Promise<void> {
   await Excel.run(async (context) => {
     const sheet = sheetName
       ? context.workbook.worksheets.getItem(sheetName)
       : context.workbook.worksheets.getActiveWorksheet();
     const range = sheet.getRange(address);
-    range.getColumnsBefore().delete('Left');
+    range.load('rowCount, columnCount');
+    await context.sync();
+
+    const anchorCol = range.columnCount > 1 ? range.getColumn(0) : range;
+    for (let i = 0; i < Math.max(1, count); i++) anchorCol.delete('Left');
     await context.sync();
   });
 }
@@ -1225,19 +1249,27 @@ export async function textToColumns(
 
     const sep = delimiter || ',';
     const rows = range.values as (string | number | boolean | null)[][];
-    const split = rows.map((row) =>
-      String(row[0] ?? '')
-        .split(sep)
-        .map((piece) => piece.trim())
-    );
-    const width = Math.max(...split.map((r) => r.length));
-    const padded = split.map((r) => {
-      const copy = [...r];
-      while (copy.length < width) copy.push('');
-      return copy;
-    });
 
-    range.getRow(0).getColumn(0).getResizedRange(padded.length - 1, width - 1).values = padded;
+    const pieces: string[][] = [];
+    let width = 0;
+    for (let i = 0; i < rows.length; i++) {
+      const cell = rows[i][0];
+      const text = cell === null || cell === undefined ? '' : String(cell);
+      const fields = text.split(sep);
+      for (let f = 0; f < fields.length; f++) fields[f] = fields[f].trim();
+      if (fields.length > width) width = fields.length;
+      pieces.push(fields);
+    }
+    if (width === 0) return;
+
+    const out: (string | number | boolean | null)[][] = [];
+    for (let i = 0; i < pieces.length; i++) {
+      const line: (string | number | boolean | null)[] = [];
+      for (let f = 0; f < width; f++) line.push(pieces[i][f] ?? null);
+      out.push(line);
+    }
+
+    range.getRow(0).getColumn(0).getResizedRange(out.length - 1, width - 1).values = out;
     await context.sync();
   });
 }
@@ -1258,7 +1290,8 @@ export async function removeDuplicates(
     const rows = range.values as (string | number | boolean | null)[][];
     if (rows.length < 2) return 0;
 
-    const seen = new Set<string>();
+    // Seed with the header so a data row identical to it is also caught.
+    const seen = new Set<string>([JSON.stringify(rows[0])]);
     const keep: (string | number | boolean | null)[][] = [rows[0]];
     let removed = 0;
     for (let i = 1; i < rows.length; i++) {
@@ -1272,13 +1305,16 @@ export async function removeDuplicates(
     }
 
     if (removed > 0) {
+      // Rewrite the whole block as the kept rows plus blanks. Clearing the tail
+      // first matters: clear() and values are queued in order, so a leftover
+      // duplicate would otherwise survive the compaction.
       const width = range.columnCount;
-      const tail = sheet
-        .getRange(address)
-        .getRow(keep.length)
-        .getResizedRange(rows.length - keep.length, width - 1);
-      tail.clear(Excel.ClearApplyTo.contents);
-      range.getRow(0).getColumn(0).getResizedRange(keep.length - 1, width - 1).values = keep;
+      const compacted: (string | number | boolean | null)[][] = keep.concat(
+        Array.from({ length: rows.length - keep.length }, () =>
+          Array.from({ length: width }, () => null)
+        )
+      );
+      range.values = compacted;
       await context.sync();
     }
     return removed;
@@ -1362,7 +1398,11 @@ export async function createPivotTable(
     }
     const colKeys = [...new Set([...groups.values()].flatMap((g) => [...g.buckets.keys()]))];
 
-    const header = [...rows.map(labelFor), ...(colKeys.length > 1 ? colKeys : []), ...values.map(labelFor)];
+    const header = [
+      ...rows,
+      ...(colKeys.length > 1 ? colKeys : []),
+      ...values.map((v) => `Sum of ${v}`),
+    ];
     const body = allRowKeys.map((rowParts) => {
       const line: (string | number)[] = [...rowParts];
       for (const ck of colKeys.length > 1 ? colKeys : ['Total']) {
@@ -1390,10 +1430,6 @@ export async function createPivotTable(
     await context.sync();
 
     return `Pivot table written to ${targetAddress} (rows: ${rows.join(', ')}, values: ${values.join(', ')}, ${allRowKeys.length} groups)`;
-
-    function labelFor(name: string): string {
-      return `Sum of ${name}`;
-    }
   });
 }
 

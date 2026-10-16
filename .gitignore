@@ -44,3 +44,6 @@ knowledge_update.json
 
 # OpenCode
 .opencode/
+
+# Test build artifacts
+src/lib/__tests__/api.mjs
